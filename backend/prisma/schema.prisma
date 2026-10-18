@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  CLIENTE
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductCategory {
+  RACAO
+  PETISCOS
+  HIGIENE
+  BRINQUEDOS
+  ACESSORIOS
+  FARMACIA
+}
+
+enum Species {
+  CAO
+  GATO
+  OUTRO
+}
+
+enum PetSize {
+  P
+  M
+  G
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentProvider {
+  MERCADO_PAGO
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  REFUNDED
+}
+
+model User {
+  id           String               @id @default(uuid())
+  name         String
+  email        String               @unique
+  phone        String?
+  passwordHash String
+  role         UserRole             @default(CLIENTE)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  resetTokens  PasswordResetToken[]
+  cart         Cart?
+  orders       Order[]
+  pets         Pet[]
+  appointments Appointment[]
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Product {
+  id           String          @id @default(uuid())
+  name         String
+  description  String
+  priceInCents Int
+  stock        Int
+  imageUrl     String
+  category     ProductCategory @default(ACESSORIOS)
+  species      Species?
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  cartItems    CartItem[]
+
+  @@index([active, createdAt])
+  @@map("products")
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  userId       String
+  status       OrderStatus @default(CONFIRMED)
+  totalInCents Int
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation(fields: [userId], references: [id])
+  items        OrderItem[]
+  payments     Payment[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("orders")
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String
+  provider          PaymentProvider
+  status            PaymentStatus   @default(PENDING)
+  amountInCents     Int
+  externalReference String          @unique
+  preferenceId      String?         @unique
+  providerPaymentId String?         @unique
+  providerStatus    String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+model OrderItem {
+  id               String @id @default(uuid())
+  orderId          String
+  productId        String
+  productName      String
+  imageUrl         String
+  unitPriceInCents Int
+  quantity         Int
+  subtotalInCents  Int
+  order            Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Pet {
+  id           String        @id @default(uuid())
+  userId       String
+  name         String
+  species      Species
+  breed        String?
+  size         PetSize
+  birthDate    DateTime?
+  weightKg     Float?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@index([userId])
+  @@map("pets")
+}
+
+model Service {
+  id                 String        @id @default(uuid())
+  name               String
+  description        String
+  durationMinutes    Int
+  priceSmallInCents  Int
+  priceMediumInCents Int
+  priceLargeInCents  Int
+  active             Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  appointments       Appointment[]
+
+  @@index([active])
+  @@map("services")
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  userId          String
+  petId           String
+  serviceId       String
+  scheduledAt     DateTime
+  durationMinutes Int
+  priceInCents    Int
+  status          AppointmentStatus @default(SCHEDULED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pet             Pet               @relation(fields: [petId], references: [id], onDelete: Cascade)
+  service         Service           @relation(fields: [serviceId], references: [id])
+
+  @@index([userId, scheduledAt])
+  @@index([scheduledAt, status])
+  @@index([petId])
+  @@index([serviceId])
+  @@map("appointments")
+}
