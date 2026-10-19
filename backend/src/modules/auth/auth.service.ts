@@ -176,6 +176,10 @@ export class AuthService {
      * O token ainda é retornado porque o projeto
      * não possui envio de e-mail nesta etapa.
      */
+    // TODO: o token de recuperação é devolvido na resposta porque
+    // o projeto não envia e-mail. Assim, quem souber o e-mail de uma
+    // conta consegue redefinir a senha dela. Antes de qualquer uso
+    // real, enviar o token por e-mail e retornar apenas a mensagem.
     return {
       message: "Token gerado com sucesso.",
       token,

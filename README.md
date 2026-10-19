@@ -23,15 +23,32 @@ Aplicativo de pet shop com e-commerce de produtos (pagamento pelo Mercado Pago) 
 
 ## Como rodar
 
+Pré-requisitos: Node.js e Docker. Sem Docker, também funciona com um PostgreSQL instalado localmente: basta pular o passo 3 e apontar `DATABASE_URL`/`DIRECT_URL` para ele.
+
 ### Backend
 
 ```bash
 cd backend
+
+# 1. Variáveis de ambiente
+#    O Prisma lê o .env; o docker-compose lê o .env.local.
 cp .env.example .env
+cp .env .env.local
+
+# 2. Dependências
 npm install
+
+# 3. Banco de dados (PostgreSQL 16 em localhost:5432)
 docker compose up -d db
+
+# 4. Migrations e Prisma Client
 npx prisma migrate deploy
 npx prisma generate
+
+# 5. Dados de demonstração (pode ser executado de novo sem duplicar dados)
+npm run db:seed
+
+# 6. API em http://localhost:3000
 npm run dev
 ```
 
@@ -39,10 +56,25 @@ npm run dev
 
 ```bash
 cd mobile
-cp .env.example .env
+cp .env.example .env   # ajuste EXPO_PUBLIC_API_URL para o IP da sua máquina
 npm install
 npm start
 ```
+
+No celular, use o IP da máquina na rede local (não `localhost`), por exemplo `http://192.168.0.10:3000`.
+
+## Credenciais de demonstração
+
+Criadas por `npm run db:seed`:
+
+| Perfil | E-mail | Senha padrão |
+| --- | --- | --- |
+| Administrador | `admin@example.com` | `Admin@123` |
+| Cliente | `cliente@example.com` | `Cliente@123` |
+
+As senhas podem ser trocadas pelas variáveis `SEED_ADMIN_PASSWORD` e `SEED_CLIENT_PASSWORD` no `backend/.env` antes de rodar o seed. Se o usuário já existir, o seed não altera a senha.
+
+O seed também cria 10 produtos, 3 serviços (preços por porte P/M/G), 2 pets do cliente e 4 pedidos do cliente nos status Confirmado, Em processamento, Concluído e Cancelado, cada um com seu pagamento.
 
 ## Variáveis de ambiente
 
@@ -56,6 +88,7 @@ Backend (`backend/.env`):
 | `MERCADOPAGO_ACCESS_TOKEN` | Token do Mercado Pago (use o de teste) |
 | `MERCADOPAGO_RETURN_URL` | Deep link de retorno (`petshop://payment-return`) |
 | `MERCADOPAGO_WEBHOOK_SECRET`, `MERCADOPAGO_WEBHOOK_URL` | Assinatura e URL pública do webhook |
+| `SEED_ADMIN_PASSWORD`, `SEED_CLIENT_PASSWORD` | Senhas dos usuários de demonstração criados pelo seed |
 
 Mobile (`mobile/.env`):
 
@@ -106,6 +139,13 @@ O script verifica toques sem papel, campos sem rótulo, imagens sem rótulo e es
 - Orientação travada em retrato (`orientation: "portrait"`), o que a WCAG 1.3.4 recomenda evitar.
 - Apenas tema claro (`userInterfaceStyle: "light"`).
 - A versão web não é alvo de teste com leitor de tela.
+
+## Limitações conhecidas
+
+> **Não use este projeto em produção.** Ele foi feito para fins acadêmicos.
+
+- **Recuperação de senha devolve o token na resposta.** O projeto não envia e-mail, então `POST /auth/forgot-password` retorna o token de redefinição diretamente na resposta da API. Na prática, qualquer pessoa que saiba o e-mail de uma conta consegue redefinir a senha dela. Antes de qualquer uso real, o token precisa ser enviado por e-mail e a resposta deve conter apenas a mensagem genérica.
+- **Credenciais de demonstração são públicas.** As senhas padrão do seed estão neste README; troque-as ou não rode o seed em um ambiente acessível a terceiros.
 
 ## Estrutura de pastas
 
