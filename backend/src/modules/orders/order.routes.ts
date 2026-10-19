@@ -43,13 +43,6 @@ orderRoutes.patch(
   ),
 );
 
-orderRoutes.post(
-  "/",
-  orderController.create.bind(
-    orderController,
-  ),
-);
-
 orderRoutes.get(
   "/",
   validate(orderListQuerySchema, "query"),

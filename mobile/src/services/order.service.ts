@@ -8,16 +8,6 @@ import type {
 } from '../types/order';
 
 export const orderService = {
-  async create(): Promise<Order> {
-    const response =
-      await api.post<Order>(
-        '/orders',
-        {},
-      );
-
-    return response.data;
-  },
-
   async list(
     params: OrderListParams = {},
   ): Promise<OrderListResponse> {
