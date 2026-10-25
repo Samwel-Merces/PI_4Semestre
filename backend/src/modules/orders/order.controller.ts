@@ -29,20 +29,6 @@ export class OrderController {
     return OrderController.#instance;
   }
 
-  async create(
-    req: Request,
-    res: Response,
-  ) {
-    const order =
-      await orderService.create(
-        req.user!.userId,
-      );
-
-    return res
-      .status(201)
-      .json(order);
-  }
-
   async listForUser(
     req: Request,
     res: Response,
