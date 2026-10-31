@@ -79,6 +79,22 @@ export class PaymentService {
     return PaymentService.#instance;
   }
 
+  // Sem "source_news=webhooks", o Mercado Pago também envia notificações
+  // no formato IPN antigo (?id=...&topic=payment|merchant_order). Elas não
+  // passam na validação de assinatura e seriam reenviadas sem parar.
+  private buildNotificationUrl(): string {
+    const url = new URL(
+      env.MERCADOPAGO_WEBHOOK_URL,
+    );
+
+    url.searchParams.set(
+      "source_news",
+      "webhooks",
+    );
+
+    return url.toString();
+  }
+
   private async reserveCheckout(
     userId: string,
   ): Promise<PendingCheckout> {
@@ -342,7 +358,7 @@ export class PaymentService {
               checkout.payment.externalReference,
 
             notification_url:
-              env.MERCADOPAGO_WEBHOOK_URL,
+              this.buildNotificationUrl(),
 
             back_urls: {
               success:
@@ -355,9 +371,12 @@ export class PaymentService {
 
             auto_return: "approved",
 
+            // O e-mail do cliente não é enviado: com credenciais de teste,
+            // um e-mail que não é de usuário de teste faz o Mercado Pago
+            // recusar o pagamento ("uma das partes é de teste"). O cliente
+            // informa o e-mail na própria página do Mercado Pago.
             payer: {
               name: checkout.order.user.name,
-              email: checkout.order.user.email,
             },
             items: checkout.order.items.map(
               (item) => ({
