@@ -4,6 +4,51 @@ Entradas mais recentes no topo.
 
 ---
 
+## 31/10/2026 — Correções no pagamento pelo Mercado Pago
+
+### O que mudou
+
+1. **O e-mail do cliente não é mais enviado na preferência de pagamento.**
+   Com credenciais de teste, o e-mail `cliente@example.com` não pertence a nenhum usuário de teste, e o Mercado Pago recusava o pagamento com "Uma das partes com as quais você está tentando efetuar o pagamento é de teste". Agora só o nome vai em `payer`. O cliente informa o e-mail na página do Mercado Pago.
+2. **A URL de notificação recebe `?source_news=webhooks`.**
+   Sem esse parâmetro, o Mercado Pago enviava, além do webhook, notificações no formato IPN antigo (`?id=...&topic=payment` e `?id=...&topic=merchant_order`). Essas notificações não passam na validação de assinatura, eram recusadas com 401 e o Mercado Pago as reenviava várias vezes. O pedido era confirmado normalmente pelo webhook, mas o log ficava cheio de recusas.
+3. **O log de webhook recusado ficou mais completo.**
+   Agora mostra o tipo da notificação, o motivo da recusa dado pelo SDK (`reason`) e os nomes dos parâmetros da URL. Nenhum segredo ou valor de assinatura é registrado.
+
+### Arquivos
+
+| Arquivo | Alteração |
+| --- | --- |
+| `backend/src/modules/payments/payment.service.ts` | `payer` sem e-mail; novo método `buildNotificationUrl` |
+| `backend/src/modules/payments/payment.controller.ts` | Campos `type`, `action`, `reason` e `queryKeys` no log de recusa |
+| `docs/ALTERACOES.md` | Esta entrada |
+
+### Como foi testado
+
+Compras de teste pelo app web, com vendedor e comprador de teste do Mercado Pago e webhook exposto por um túnel (cloudflared):
+
+- Antes da correção 1: o checkout do Mercado Pago mostrava o erro "uma das partes é de teste".
+- Depois da correção 1: pagamento aprovado e pedido `CONFIRMED`, mas com 6 notificações IPN recusadas por `SignatureMismatch`.
+- Depois da correção 2: pagamento aprovado, pedido `CONFIRMED` e **nenhuma notificação recusada** para a compra nova.
+- `npx tsc --noEmit` no backend: sem erros.
+
+### Como configurar o Mercado Pago para testar
+
+1. Em **Contas de teste** (painel de desenvolvedor), criar um **vendedor** e um **comprador** de teste.
+2. Entrar como **vendedor de teste** numa janela anônima e copiar o Access Token de **Credenciais de produção** da aplicação dele. Como a conta é de teste, nenhum dinheiro real é movimentado.
+3. Nessa aplicação, configurar o **Webhook** (evento Pagamentos) com uma URL pública que aponte para `/payments/webhook`, por exemplo com `cloudflared tunnel --url http://localhost:3000`, e copiar a assinatura secreta.
+4. Preencher no `backend/.env`: `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET` e `MERCADOPAGO_WEBHOOK_URL`.
+5. Pagar numa **nova janela anônima**, entrando com o **comprador de teste**. Cartão Mastercard `5480 8328 0103 3311`, nome `APRO`, validade `11/30`, CVV `123`, CPF `12345678909`.
+
+### Pendências
+
+- Se o webhook não chegar, o pedido fica em "Aguardando pagamento" para sempre. Não há verificação do pagamento quando o cliente volta para o app.
+- Pedidos abandonados em "Aguardando pagamento" seguram o estoque, e o admin não consegue cancelá-los.
+- O app não permite retomar o pagamento de um pedido pendente.
+- Na versão web, o retorno do Mercado Pago (`petshop://payment-return`) não abre o app.
+
+---
+
 ## 18/10/2026 — Remoção de `POST /orders`, seed de demonstração e README
 
 ### O que mudou
