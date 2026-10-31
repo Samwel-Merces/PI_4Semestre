@@ -4,6 +4,34 @@ Entradas mais recentes no topo.
 
 ---
 
+## 30/10/2026 — DER completo e script SQL (item 1.5 do roteiro)
+
+### O que mudou
+
+1. **Nova pasta `docs/banco/`** com a documentação do banco de dados:
+   - `README.md`: DER em Mermaid (o GitHub desenha o diagrama), tipos enumerados, entidades, relacionamentos com a regra de exclusão de cada um, regras de integridade e o que mudou desde a primeira entrega.
+   - `script.sql`: script SQL completo do banco, gerado a partir do `schema.prisma`.
+   - `der.mmd`: código do DER, para gerar a imagem que vai no documento da entrega.
+2. Nenhum código do app ou da API foi alterado.
+
+### Por quê
+
+- O roteiro (item 1.5) pede um DER com **Usuários, Agendamentos, Produtos e Serviços** e o script SQL. O DER da primeira entrega cobria só o núcleo do e-commerce (7 tabelas), sem serviços nem agendamentos, e o script SQL não estava no documento.
+- O banco atual tem 11 tabelas e 8 enums. O DER novo cobre todas.
+
+### Como foi verificado
+
+- O `script.sql` foi executado num banco PostgreSQL 16 vazio, sem erros, e criou as 11 tabelas.
+- Esse banco foi comparado com o banco criado pelas migrations (`prisma migrate diff --from-url ... --to-url ...`). Resultado: nenhuma diferença.
+- As regras de exclusão da tabela de relacionamentos foram conferidas uma a uma com as chaves estrangeiras do script.
+
+### O que o grupo precisa fazer
+
+1. Gerar a imagem do DER (instruções em `docs/banco/README.md`) e substituir a Figura 8 do documento.
+2. Atualizar no documento os quadros 17 (entidades) e 18 (relacionamentos) e as seções 6.6 e 6.7, usando o `docs/banco/README.md`. Colocar o `script.sql` como anexo.
+
+---
+
 ## 18/10/2026 — Remoção de `POST /orders`, seed de demonstração e README
 
 ### O que mudou
