@@ -4,6 +4,54 @@ Entradas mais recentes no topo.
 
 ---
 
+## 31/10/2026 — Verificação, retomada e expiração de pagamentos
+
+### O que mudou
+
+1. **Verificação do pagamento sem depender do webhook.**
+   - Nova rota `POST /payments/orders/:orderId/sync` (cliente logado, só os próprios pedidos). Busca no Mercado Pago os pagamentos pendentes do pedido pela referência externa e aplica as mesmas regras do webhook.
+   - A lógica do webhook foi separada no método `applyProviderPayment`, usado pelo webhook e pela verificação.
+   - No app, ao abrir um pedido "Aguardando pagamento", a verificação roda sozinha. A tela também mostra um aviso e o botão **"Verificar pagamento"**.
+2. **Retomar o pagamento.**
+   - Nova rota `POST /payments/orders/:orderId/resume`. Confere o pagamento antes, para não cobrar de novo um pedido que já foi pago, e devolve o link do Mercado Pago do pedido.
+   - Recusa com 409 se o pedido não está aguardando pagamento ou se o prazo passou.
+   - No app, botão **"Pagar agora"** no pedido pendente. Ao voltar do Mercado Pago, o pedido é recarregado e verificado.
+3. **Expiração de pedidos abandonados.**
+   - O link de pagamento expira em 30 minutos (`expires` e `expiration_date_to` na preferência).
+   - Uma rotina roda ao ligar a API e a cada 5 minutos (`server.ts`). Para pedidos "Aguardando pagamento" com mais de 35 minutos, ela confere no Mercado Pago e, se não houver nenhuma tentativa de pagamento, cancela o pedido e devolve o estoque. O pagamento fica com `providerStatus` igual a `expired`.
+   - Pedidos com pagamento em andamento no Mercado Pago (ex.: boleto em aberto) não são cancelados. O webhook resolve.
+   - O cancelamento usa o mesmo método do checkout que falha ao criar a preferência (`cancelPendingPayment`). O estoque só volta se o pedido ainda estava aguardando pagamento.
+4. **App:** a abertura da página do Mercado Pago foi para `utils/openPaymentPage.ts`, usada pelo checkout e pelo detalhe do pedido.
+
+### Arquivos
+
+| Arquivo | Alteração |
+| --- | --- |
+| `backend/src/modules/payments/payment.service.ts` | `synchronizeOrderPayment`, `resumeOrderPayment`, `expireAbandonedCheckouts`, `applyProviderPayment`, `cancelPendingPayment`; expiração na preferência |
+| `backend/src/modules/payments/payment.controller.ts` | Ações `syncOrderPayment` e `resumeOrderPayment` |
+| `backend/src/modules/payments/payment.routes.ts` | Rotas `/orders/:orderId/sync` e `/orders/:orderId/resume` |
+| `backend/src/server.ts` | Rotina de expiração a cada 5 minutos, parada no encerramento |
+| `mobile/src/utils/openPaymentPage.ts` | **Novo** — abre o Mercado Pago (web ou celular) |
+| `mobile/src/services/payment.service.ts` | `syncOrderPayment` e `resumeOrderPayment` |
+| `mobile/src/hooks/useCheckout.ts` | Usa `openPaymentPage` |
+| `mobile/src/hooks/useOrderDetails.ts` | Verificação automática, `checkPayment` e `resumePayment` |
+| `mobile/src/screens/OrderDetailsScreen.tsx` | Cartão de pagamento pendente com "Pagar agora" e "Verificar pagamento" |
+
+### Como foi testado
+
+- **Webhook perdido:** um pedido pago foi voltado no banco para "Aguardando pagamento". A verificação (pela rota e ao abrir o pedido no app) o devolveu para Confirmado/Aprovado.
+- **Rota de verificação:** pedido sem pagamento continua pendente (200); pedido confirmado não muda (200); pedido de outro usuário dá 404; ID inválido dá 400; sem login dá 401.
+- **Retomar:** pedido pendente devolve o link (200); pedido pago dá 409; pedido criado com outro token do Mercado Pago dá 502 com mensagem clara. No app, "Pagar agora" abriu o Mercado Pago, o pagamento foi feito com o comprador de teste e o pedido voltou como Confirmado.
+- **Expiração:** na primeira execução, a rotina cancelou os 4 pedidos abandonados e devolveu o estoque; os pedidos pagos não mudaram. Um checkout novo com prazo de validade foi aceito pelo Mercado Pago.
+- `npx tsc --noEmit` sem erros no backend e no mobile; `npm run audit:a11y` sem problemas.
+
+### Pendências
+
+- Na versão web, o retorno do Mercado Pago (`petshop://payment-return`) não abre o app. O cliente precisa fechar a aba do Mercado Pago e voltar para a aba do app.
+- Se o webhook de um pagamento aprovado chegar depois que a rotina cancelou o pedido, o pagamento fica Aprovado e o pedido continua Cancelado. A expiração do link (30 minutos) e a folga de 5 minutos tornam isso improvável, mas o caso não é tratado.
+
+---
+
 ## 31/10/2026 — Correções no pagamento pelo Mercado Pago
 
 ### O que mudou

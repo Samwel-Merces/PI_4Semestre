@@ -48,6 +48,14 @@ interface PendingCheckout {
   order: OrderWithDetails;
 }
 
+// Prazo para pagar depois do checkout. Passado esse prazo, o Mercado Pago
+// recusa o pagamento e a rotina de expiração libera o estoque reservado.
+export const CHECKOUT_EXPIRATION_MINUTES = 30;
+
+// Folga antes de cancelar, para não atropelar um pagamento feito no limite
+// do prazo cujo webhook ainda está a caminho.
+const ABANDONED_CHECKOUT_GRACE_MINUTES = 5;
+
 type ProviderPaymentStatus =
   | "approved"
   | "pending"
@@ -242,8 +250,11 @@ export class PaymentService {
     );
   }
 
-  private async cancelReservedCheckout(
+  // Cancela um pagamento que nunca chegou a ser feito. Se o pedido ainda
+  // aguarda pagamento, ele é cancelado e o estoque reservado volta.
+  private async cancelPendingPayment(
     paymentId: string,
+    providerStatus: string,
   ): Promise<void> {
     await prisma.$transaction(
       async (transaction) => {
@@ -269,6 +280,24 @@ export class PaymentService {
           return;
         }
 
+        await transaction.payment.update({
+          where: {
+            id: payment.id,
+          },
+
+          data: {
+            status: "CANCELLED",
+            providerStatus,
+          },
+        });
+
+        if (
+          payment.order.status !==
+          "PENDING_PAYMENT"
+        ) {
+          return;
+        }
+
         for (const item of payment.order.items) {
           await transaction.product.update({
             where: {
@@ -282,18 +311,6 @@ export class PaymentService {
             },
           });
         }
-
-        await transaction.payment.update({
-          where: {
-            id: payment.id,
-          },
-
-          data: {
-            status: "CANCELLED",
-            providerStatus:
-              "preference_creation_failed",
-          },
-        });
 
         await transaction.order.update({
           where: {
@@ -371,6 +388,16 @@ export class PaymentService {
 
             auto_return: "approved",
 
+            expires: true,
+            expiration_date_from:
+              new Date().toISOString(),
+            expiration_date_to:
+              new Date(
+                Date.now() +
+                  CHECKOUT_EXPIRATION_MINUTES *
+                    60_000,
+              ).toISOString(),
+
             // O e-mail do cliente não é enviado: com credenciais de teste,
             // um e-mail que não é de usuário de teste faz o Mercado Pago
             // recusar o pagamento ("uma das partes é de teste"). O cliente
@@ -415,8 +442,9 @@ export class PaymentService {
         initPoint: preference.init_point,
       };
     } catch (error) {
-      await this.cancelReservedCheckout(
+      await this.cancelPendingPayment(
         checkout.payment.id,
+        "preference_creation_failed",
       );
 
       if (error instanceof AppError) {
@@ -439,6 +467,260 @@ export class PaymentService {
         id: providerPaymentId,
       });
 
+    await this.applyProviderPayment(
+      providerPaymentId,
+      providerPayment,
+    );
+  }
+
+  // Plano B do webhook: quando o cliente volta do Mercado Pago, o app pede
+  // para conferir o pagamento. Os pagamentos ainda pendentes do pedido são
+  // buscados no Mercado Pago pela referência externa e atualizados com as
+  // mesmas regras do webhook.
+  async synchronizeOrderPayment(
+    userId: string,
+    orderId: string,
+  ): Promise<void> {
+    const order =
+      await prisma.order.findFirst({
+        where: {
+          id: orderId,
+          userId,
+        },
+
+        include: {
+          payments: {
+            where: {
+              status: "PENDING",
+            },
+          },
+        },
+      });
+
+    if (!order) {
+      throw new AppError(
+        "Pedido não encontrado.",
+        404,
+        "ORDER_NOT_FOUND",
+      );
+    }
+
+    if (order.status !== "PENDING_PAYMENT") {
+      return;
+    }
+
+    for (const payment of order.payments) {
+      const search =
+        await this.paymentClient.search({
+          options: {
+            external_reference:
+              payment.externalReference,
+            sort: "date_last_updated",
+            criteria: "desc",
+          },
+        });
+
+      const results = search.results ?? [];
+
+      // Um aprovado vale mais que tentativas recusadas antes dele.
+      const providerPayment =
+        results.find(
+          (result) =>
+            result.status === "approved",
+        ) ?? results[0];
+
+      if (providerPayment?.id) {
+        await this.applyProviderPayment(
+          String(providerPayment.id),
+          providerPayment,
+        );
+      }
+    }
+  }
+
+  // Devolve o link do Mercado Pago de um pedido que ainda não foi pago.
+  // Confere o pagamento antes, para não mandar pagar de novo um pedido
+  // cujo webhook só não chegou.
+  async resumeOrderPayment(
+    userId: string,
+    orderId: string,
+  ): Promise<{ initPoint: string }> {
+    await this.synchronizeOrderPayment(
+      userId,
+      orderId,
+    );
+
+    const order =
+      await prisma.order.findFirst({
+        where: {
+          id: orderId,
+          userId,
+        },
+
+        include: {
+          payments: {
+            where: {
+              status: "PENDING",
+              preferenceId: {
+                not: null,
+              },
+            },
+
+            orderBy: {
+              createdAt: "desc",
+            },
+
+            take: 1,
+          },
+        },
+      });
+
+    if (!order) {
+      throw new AppError(
+        "Pedido não encontrado.",
+        404,
+        "ORDER_NOT_FOUND",
+      );
+    }
+
+    const payment = order.payments[0];
+
+    if (
+      order.status !== "PENDING_PAYMENT" ||
+      !payment?.preferenceId
+    ) {
+      throw new AppError(
+        "Este pedido não está aguardando pagamento.",
+        409,
+        "ORDER_NOT_AWAITING_PAYMENT",
+      );
+    }
+
+    const expiresAt =
+      payment.createdAt.getTime() +
+      CHECKOUT_EXPIRATION_MINUTES * 60_000;
+
+    if (Date.now() > expiresAt) {
+      throw new AppError(
+        "O prazo para pagamento deste pedido expirou. Faça um novo pedido.",
+        409,
+        "CHECKOUT_EXPIRED",
+      );
+    }
+
+    try {
+      const preference =
+        await this.preferenceClient.get({
+          preferenceId: payment.preferenceId,
+        });
+
+      if (!preference.init_point) {
+        throw new Error(
+          "Preferência sem link de pagamento.",
+        );
+      }
+
+      return {
+        initPoint: preference.init_point,
+      };
+    } catch {
+      throw new AppError(
+        "Não foi possível retomar o pagamento deste pedido.",
+        502,
+        "MERCADO_PAGO_PREFERENCE_UNAVAILABLE",
+      );
+    }
+  }
+
+  // Cancela os pedidos cujo prazo de pagamento passou sem nenhuma tentativa
+  // registrada no Mercado Pago, devolvendo o estoque. Pedidos com pagamento
+  // em andamento (ex.: boleto em aberto) ficam para o webhook resolver.
+  // Devolve quantos pedidos foram cancelados.
+  async expireAbandonedCheckouts(): Promise<number> {
+    const cutoff = new Date(
+      Date.now() -
+        (CHECKOUT_EXPIRATION_MINUTES +
+          ABANDONED_CHECKOUT_GRACE_MINUTES) *
+          60_000,
+    );
+
+    const orders =
+      await prisma.order.findMany({
+        where: {
+          status: "PENDING_PAYMENT",
+          createdAt: {
+            lt: cutoff,
+          },
+        },
+
+        select: {
+          id: true,
+          userId: true,
+        },
+      });
+
+    let expiredOrders = 0;
+
+    for (const order of orders) {
+      try {
+        await this.synchronizeOrderPayment(
+          order.userId,
+          order.id,
+        );
+
+        const pendingPayments =
+          await prisma.payment.findMany({
+            where: {
+              orderId: order.id,
+              status: "PENDING",
+            },
+
+            select: {
+              id: true,
+              providerPaymentId: true,
+            },
+          });
+
+        const hasPaymentInProgress =
+          pendingPayments.some(
+            (payment) =>
+              payment.providerPaymentId !== null,
+          );
+
+        if (
+          pendingPayments.length === 0 ||
+          hasPaymentInProgress
+        ) {
+          continue;
+        }
+
+        for (const payment of pendingPayments) {
+          await this.cancelPendingPayment(
+            payment.id,
+            "expired",
+          );
+        }
+
+        expiredOrders += 1;
+      } catch (error) {
+        console.error(
+          `Não foi possível expirar o pedido ${order.id}.`,
+          error,
+        );
+      }
+    }
+
+    return expiredOrders;
+  }
+
+  private async applyProviderPayment(
+    providerPaymentId: string,
+    providerPayment: {
+      external_reference?: string;
+      transaction_amount?: number;
+      status?: string;
+    },
+  ): Promise<void> {
     if (
       !providerPayment.external_reference ||
       typeof providerPayment.transaction_amount !== "number" ||
