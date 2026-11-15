@@ -1,12 +1,8 @@
 import { useRef } from 'react';
 
 import {
-  KeyboardAvoidingView,
-  Platform,
   SafeAreaView,
-  ScrollView,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -20,11 +16,18 @@ import AppTextField, {
 } from '../components/AppTextField';
 import ChipGroup from '../components/ChipGroup';
 import FeedbackMessage from '../components/FeedbackMessage';
+import FormScrollView from '../components/FormScrollView';
 import LoadingIndicator from '../components/LoadingIndicator';
 import ScreenHeader from '../components/ScreenHeader';
+import { useDiscardConfirmation } from '../hooks/useDiscardConfirmation';
 import { usePetForm } from '../hooks/usePetForm';
 import { commonStyles as styles } from '../theme/commonStyles';
 import { confirmAction } from '../utils/confirm';
+import { focusField } from '../utils/form';
+import {
+  formatDateInput,
+  limits,
+} from '../utils/validacoes';
 
 import type { ClientStackParamList } from '../types/navigation';
 import { sizeOptions } from '../types/pet';
@@ -41,28 +44,49 @@ export default function PetFormScreen({
 }: Props) {
   const petId = route.params?.petId;
 
-  const form = usePetForm(petId);
+  const { form, loading, saving, errorMessage, save, remove } =
+    usePetForm(petId);
 
+  const { allowLeave } = useDiscardConfirmation(form.isDirty);
+
+  const nameRef = useRef<TextFieldRef>(null);
   const breedRef = useRef<TextFieldRef>(null);
   const birthDateRef = useRef<TextFieldRef>(null);
   const weightRef = useRef<TextFieldRef>(null);
   const notesRef = useRef<TextFieldRef>(null);
 
   async function handleSave(): Promise<void> {
-    if (await form.save()) {
-      navigation.goBack();
+    const outcome = await save();
+
+    if (!outcome.ok) {
+      focusField(
+        {
+          name: nameRef,
+          breed: breedRef,
+          birthDate: birthDateRef,
+          weight: weightRef,
+          notes: notesRef,
+        },
+        outcome.invalidField,
+      );
+
+      return;
     }
+
+    allowLeave();
+    navigation.goBack();
   }
 
   async function handleRemove(): Promise<void> {
     const confirmed = await confirmAction({
       title: 'Excluir pet',
-      message: `Deseja excluir ${form.name}?`,
+      message: `Deseja excluir ${form.values.name}?`,
       confirmText: 'Excluir',
       destructive: true,
     });
 
-    if (confirmed && (await form.remove())) {
+    if (confirmed && (await remove())) {
+      allowLeave();
       navigation.goBack();
     }
   }
@@ -74,139 +98,142 @@ export default function PetFormScreen({
         onBack={() => navigation.goBack()}
       />
 
-      {form.loading ? (
+      {loading ? (
         <View style={styles.centered}>
           <LoadingIndicator />
         </View>
       ) : (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={
-            Platform.OS === 'ios' ? 'padding' : undefined
-          }
-        >
-          <ScrollView
-            contentContainerStyle={styles.formContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <AppTextField
-              label="Nome"
-              value={form.name}
-              onChangeText={form.setName}
-              placeholder="Nome do pet"
-              autoCapitalize="words"
-              editable={!form.saving}
-              returnKeyType="next"
-              blurOnSubmit={false}
-              onSubmitEditing={() => breedRef.current?.focus()}
+        <FormScrollView contentContainerStyle={styles.formContent}>
+          <AppTextField
+            ref={nameRef}
+            label="Nome"
+            placeholder="Nome do pet"
+            {...form.fieldProps('name')}
+            onChangeText={(value) => form.setValue('name', value)}
+            autoCapitalize="words"
+            autoCorrect={false}
+            maxLength={limits.petNameMax}
+            editable={!saving}
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => breedRef.current?.focus()}
+          />
+
+          <View>
+            <Text style={styles.label}>Espécie</Text>
+
+            <ChipGroup
+              groupLabel="Espécie"
+              options={speciesOptions}
+              selected={form.values.species}
+              onSelect={(value) =>
+                value && form.setValue('species', value)
+              }
+              disabled={saving}
             />
+          </View>
 
-            <View>
-              <Text style={styles.label}>Espécie</Text>
+          <View>
+            <Text style={styles.label}>Porte</Text>
 
-              <ChipGroup
-                groupLabel="Espécie"
-                options={speciesOptions}
-                selected={form.species}
-                onSelect={(value) =>
-                  value && form.setSpecies(value)
-                }
-                disabled={form.saving}
-              />
-            </View>
-
-            <View>
-              <Text style={styles.label}>Porte</Text>
-
-              <ChipGroup
-                groupLabel="Porte"
-                options={sizeOptions}
-                selected={form.size}
-                onSelect={(value) =>
-                  value && form.setSize(value)
-                }
-                disabled={form.saving}
-              />
-            </View>
-
-            <AppTextField
-              ref={breedRef}
-              label="Raça (opcional)"
-              value={form.breed}
-              onChangeText={form.setBreed}
-              placeholder="Ex.: Labrador"
-              editable={!form.saving}
-              returnKeyType="next"
-              blurOnSubmit={false}
-              onSubmitEditing={() => birthDateRef.current?.focus()}
+            <ChipGroup
+              groupLabel="Porte"
+              options={sizeOptions}
+              selected={form.values.size}
+              onSelect={(value) =>
+                value && form.setValue('size', value)
+              }
+              disabled={saving}
             />
+          </View>
 
-            <AppTextField
-              ref={birthDateRef}
-              label="Data de nascimento"
-              value={form.birthDate}
-              onChangeText={form.setBirthDate}
-              placeholder="DD/MM/AAAA"
-              helperText="Dia, mês e ano."
-              keyboardType="number-pad"
-              maxLength={10}
-              editable={!form.saving}
-              returnKeyType="next"
-              blurOnSubmit={false}
-              onSubmitEditing={() => weightRef.current?.focus()}
-            />
+          <AppTextField
+            ref={breedRef}
+            label="Raça (opcional)"
+            placeholder="Ex.: Labrador"
+            {...form.fieldProps('breed')}
+            onChangeText={(value) => form.setValue('breed', value)}
+            autoCapitalize="words"
+            maxLength={limits.breedMax}
+            editable={!saving}
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => birthDateRef.current?.focus()}
+          />
 
-            <AppTextField
-              ref={weightRef}
-              label="Peso em kg"
-              value={form.weight}
-              onChangeText={form.setWeight}
-              placeholder="8,5"
-              keyboardType="decimal-pad"
-              editable={!form.saving}
-              returnKeyType="next"
-              blurOnSubmit={false}
-              onSubmitEditing={() => notesRef.current?.focus()}
-            />
+          <AppTextField
+            ref={birthDateRef}
+            label="Data de nascimento (opcional)"
+            placeholder="DD/MM/AAAA"
+            helperText="Dia, mês e ano."
+            {...form.fieldProps('birthDate')}
+            onChangeText={(value) =>
+              form.setValue('birthDate', formatDateInput(value))
+            }
+            keyboardType="number-pad"
+            autoCorrect={false}
+            maxLength={10}
+            editable={!saving}
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => weightRef.current?.focus()}
+          />
 
-            <AppTextField
-              ref={notesRef}
-              label="Observações"
-              value={form.notes}
-              onChangeText={form.setNotes}
-              placeholder="Alergias, cuidados especiais..."
-              multiline
-              editable={!form.saving}
-            />
+          <AppTextField
+            ref={weightRef}
+            label="Peso em kg (opcional)"
+            placeholder="8,5"
+            {...form.fieldProps('weight')}
+            onChangeText={(value) => form.setValue('weight', value)}
+            keyboardType="decimal-pad"
+            autoCorrect={false}
+            maxLength={6}
+            editable={!saving}
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => notesRef.current?.focus()}
+          />
 
-            <FeedbackMessage
-              kind="error"
-              message={form.errorMessage}
-              style={styles.errorText}
-            />
+          <AppTextField
+            ref={notesRef}
+            label="Observações (opcional)"
+            placeholder="Alergias, cuidados especiais..."
+            {...form.fieldProps('notes')}
+            onChangeText={(value) => form.setValue('notes', value)}
+            autoCapitalize="sentences"
+            maxLength={limits.notesMax}
+            multiline
+            editable={!saving}
+          />
 
+          <FeedbackMessage
+            kind="error"
+            message={errorMessage}
+            style={styles.errorText}
+          />
+
+          <AppButton
+            size="large"
+            label="Salvar"
+            loading={form.submitting}
+            loadingLabel="Salvando..."
+            disabled={saving}
+            onPress={() => {
+              void handleSave();
+            }}
+          />
+
+          {petId ? (
             <AppButton
-              size="large"
-              label="Salvar"
-              loading={form.saving}
-              loadingLabel="Salvando..."
+              variant="danger"
+              label="Excluir pet"
+              disabled={saving}
               onPress={() => {
-                void handleSave();
+                void handleRemove();
               }}
             />
-
-            {petId ? (
-              <AppButton
-                variant="danger"
-                label="Excluir pet"
-                disabled={form.saving}
-                onPress={() => {
-                  void handleRemove();
-                }}
-              />
-            ) : null}
-          </ScrollView>
-        </KeyboardAvoidingView>
+          ) : null}
+        </FormScrollView>
       )}
     </SafeAreaView>
   );

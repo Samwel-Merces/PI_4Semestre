@@ -1,13 +1,45 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
-const AUTH_TOKEN_KEY = '@petshop:auth-token';
+import {
+  AUTH_TOKEN_KEY,
+  LEGACY_WEB_AUTH_TOKEN_KEY,
+} from './storageKeys';
 
 function isWebStorageAvailable(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.sessionStorage !== 'undefined'
   );
+}
+
+function readWebToken(): string | null {
+  const token = window.sessionStorage.getItem(
+    AUTH_TOKEN_KEY
+  );
+
+  if (token) {
+    return token;
+  }
+
+  const legacyToken = window.sessionStorage.getItem(
+    LEGACY_WEB_AUTH_TOKEN_KEY
+  );
+
+  if (!legacyToken) {
+    return null;
+  }
+
+  window.sessionStorage.setItem(
+    AUTH_TOKEN_KEY,
+    legacyToken
+  );
+
+  window.sessionStorage.removeItem(
+    LEGACY_WEB_AUTH_TOKEN_KEY
+  );
+
+  return legacyToken;
 }
 
 export const authStorage = {
@@ -45,9 +77,7 @@ export const authStorage = {
         return null;
       }
 
-      return window.sessionStorage.getItem(
-        AUTH_TOKEN_KEY
-      );
+      return readWebToken();
     }
 
     return SecureStore.getItemAsync(
@@ -60,6 +90,10 @@ export const authStorage = {
       if (isWebStorageAvailable()) {
         window.sessionStorage.removeItem(
           AUTH_TOKEN_KEY
+        );
+
+        window.sessionStorage.removeItem(
+          LEGACY_WEB_AUTH_TOKEN_KEY
         );
       }
 

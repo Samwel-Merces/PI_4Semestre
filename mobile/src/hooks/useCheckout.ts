@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useRef,
   useState,
 } from 'react';
 
@@ -98,9 +99,16 @@ export function useCheckout() {
     [],
   );
 
+  /* Impede que dois toques rápidos criem dois pedidos. */
+  const submitLock = useRef(false);
+
   const startCheckout =
     useCallback(
       async (): Promise<string | null> => {
+        if (submitLock.current) {
+          return null;
+        }
+
         setErrorMessage('');
 
         if (
@@ -124,6 +132,7 @@ export function useCheckout() {
         }
 
         try {
+          submitLock.current = true;
           setSubmitting(true);
 
           const checkout =
@@ -161,6 +170,7 @@ export function useCheckout() {
 
           return null;
         } finally {
+          submitLock.current = false;
           setSubmitting(false);
         }
       },

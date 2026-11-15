@@ -4,6 +4,39 @@ Entradas mais recentes no topo.
 
 ---
 
+## 14/11/2026 — Formulários, validações e navegação do mobile
+
+### O que mudou
+
+1. **Validação única e alinhada ao backend.** `mobile/src/utils/validacoes.ts` concentra normalização (nome, e-mail, telefone), máscaras (telefone e data) e regras de cada campo, com as mesmas mensagens e limites dos schemas Zod. `utils/formRules.ts` monta a validação de cada formulário. Os hooks deixaram de repetir regras.
+2. **Erros junto ao campo.** Novo `hooks/useFormState.ts`: o erro aparece abaixo do campo após o blur ou a tentativa de envio, some quando o valor fica válido, o envio leva o foco ao primeiro campo inválido e os erros de validação da API (400) vão para o campo certo. Erros gerais continuam no `FeedbackMessage`.
+3. **Envio único.** Login, cadastro, recuperação, perfil, produto, pet, serviço, agendamento, carrinho e checkout ignoram toques repetidos enquanto a requisição está em andamento.
+4. **Mensagens da API.** `utils/error.ts` classifica 400/422, 401 (sessão × senha errada), 403, 404, 409, 429, 5xx e falha de conexão. Erros 5xx nunca mostram o texto do servidor.
+5. **Navegação.**
+   - Cadastro concluído volta ao login existente com o e-mail preenchido e mensagem de sucesso; redefinição de senha também volta ao login com mensagem.
+   - Sessão expirada (401) limpa a sessão e mostra o aviso no login.
+   - Telas de lista e abas não são mais empilhadas de novo (`popTo`/`navigateWithoutDuplicate`).
+   - Formulários modificados pedem confirmação antes de serem descartados; formulários sem alteração saem direto.
+6. **Teclado.** Novo `components/FormScrollView.tsx` em todos os formulários, para o teclado não cobrir o campo nem o botão.
+7. **Componentes base.** Buscas do catálogo e de produtos (admin) passaram a usar `AppTextField` com rótulo visível; botões de produtos (admin) e do checkout passaram a usar `AppButton`.
+8. **SecureStore.** A chave do token é `petshop_auth_token` (a antiga `@petshop:auth-token` é inválida no SecureStore). Na web, um token salvo com a chave antiga é migrado na primeira leitura.
+9. **Testes.** `npm test` (66 testes em `mobile/tests/`, executor nativo do Node) e `npm run typecheck`.
+
+Nenhum contrato da API, migration ou `schema.prisma` foi alterado.
+
+### Como testar
+
+```bash
+cd mobile
+npm run typecheck
+npm test
+npm run audit:a11y
+```
+
+Testes manuais: ver a seção "Testes manuais" do relatório da tarefa (cadastro, login, sessão expirada, descarte de formulário, teclado em Android/iOS/web).
+
+---
+
 ## 30/10/2026 — DER completo e script SQL (item 1.5 do roteiro)
 
 ### O que mudou

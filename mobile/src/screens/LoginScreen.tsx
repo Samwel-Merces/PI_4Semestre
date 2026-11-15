@@ -13,11 +13,15 @@ import AppTextField, {
   type TextFieldRef,
 } from '../components/AppTextField';
 import FeedbackMessage from '../components/FeedbackMessage';
+import FormScrollView from '../components/FormScrollView';
 import PasswordInput from '../components/PasswordInput';
 import ScreenTitle from '../components/ScreenTitle';
+import { useAuth } from '../hooks/useAuth';
 import { useLogin } from '../hooks/useLogin';
 import { authStyles as styles } from '../theme/authStyles';
 import type { AuthStackParamList } from '../types/navigation';
+import { focusField } from '../utils/form';
+import { limits } from '../utils/validacoes';
 
 type Props = NativeStackScreenProps<
   AuthStackParamList,
@@ -26,26 +30,40 @@ type Props = NativeStackScreenProps<
 
 export default function LoginScreen({
   navigation,
+  route,
 }: Props) {
+  const { sessionNotice } = useAuth();
+
   const {
-    email,
-    password,
+    form,
     loading,
     errorMessage,
-    setEmail,
-    setPassword,
     handleLogin,
-  } = useLogin();
+  } = useLogin(route.params?.email);
 
+  const successMessage = route.params?.successMessage ?? '';
+
+  const emailRef = useRef<TextFieldRef>(null);
   const passwordRef = useRef<TextFieldRef>(null);
 
   async function onLoginPress() {
-    await handleLogin();
+    if (successMessage) {
+      navigation.setParams({ successMessage: undefined });
+    }
+
+    const outcome = await handleLogin();
+
+    if (!outcome.ok) {
+      focusField(
+        { email: emailRef, password: passwordRef },
+        outcome.invalidField,
+      );
+    }
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <FormScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.logo}>
           PETSHOP
         </Text>
@@ -59,41 +77,57 @@ export default function LoginScreen({
         </Text>
 
         <View style={styles.form}>
+          {sessionNotice ? (
+            <FeedbackMessage
+              kind="info"
+              message={sessionNotice}
+              style={styles.successText}
+            />
+          ) : null}
+
+          <FeedbackMessage
+            kind="success"
+            message={successMessage}
+            style={styles.successText}
+          />
+
           <AppTextField
+            ref={emailRef}
             label="E-mail"
-            style={errorMessage ? styles.inputError : undefined}
             placeholder="nome@exemplo.com"
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="email"
             textContentType="emailAddress"
-            value={email}
-            onChangeText={setEmail}
+            maxLength={limits.emailMax}
+            {...form.fieldProps('email')}
+            onChangeText={(value) => form.setValue('email', value)}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => passwordRef.current?.focus()}
           />
 
           <PasswordInput
             ref={passwordRef}
             label="Senha"
-            style={errorMessage ? styles.inputError : undefined}
             placeholder="Digite sua senha"
             autoComplete="current-password"
             textContentType="password"
-            value={password}
-            onChangeText={setPassword}
+            {...form.fieldProps('password')}
+            onChangeText={(value) => form.setValue('password', value)}
             editable={!loading}
             returnKeyType="done"
-            onSubmitEditing={onLoginPress}
+            submitBehavior="blurAndSubmit"
+            onSubmitEditing={() => {
+              void onLoginPress();
+            }}
           />
 
           <FeedbackMessage
             kind="error"
             message={errorMessage}
-            style={styles.errorText}
           />
 
           <AppButton
@@ -101,7 +135,9 @@ export default function LoginScreen({
             label="Entrar"
             loading={loading}
             loadingLabel="Entrando..."
-            onPress={onLoginPress}
+            onPress={() => {
+              void onLoginPress();
+            }}
             style={{ marginTop: 8 }}
           />
 
@@ -119,7 +155,7 @@ export default function LoginScreen({
             onPress={() => navigation.navigate('Register')}
           />
         </View>
-      </View>
+      </FormScrollView>
     </SafeAreaView>
   );
 }

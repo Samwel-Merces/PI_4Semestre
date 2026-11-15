@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -11,6 +12,11 @@ import {
 import {
   getApiErrorMessage,
 } from '../utils/error';
+
+import {
+  limits,
+  validateQuantity,
+} from '../utils/validacoes';
 
 interface UseAddToCartProps {
   productId: string;
@@ -37,12 +43,15 @@ export function useAddToCart({
     setSuccessMessage,
   ] = useState('');
 
+  /* Impede que dois toques rápidos adicionem o item duas vezes. */
+  const submitLock = useRef(false);
+
   useEffect(() => {
     setQuantity((currentQuantity) => {
       const maximumAllowed =
         Math.min(
           maximumQuantity,
-          99,
+          limits.cartQuantityMax,
         );
 
       if (maximumAllowed < 1) {
@@ -66,7 +75,7 @@ export function useAddToCart({
           Math.min(
             currentQuantity + 1,
             maximumQuantity,
-            99,
+            limits.cartQuantityMax,
           ),
       );
     }, [maximumQuantity]);
@@ -87,30 +96,26 @@ export function useAddToCart({
 
   const addToCart = useCallback(
     async (): Promise<boolean> => {
-      setErrorMessage('');
-      setSuccessMessage('');
-
-      if (maximumQuantity <= 0) {
-        setErrorMessage(
-          'O produto está indisponível.',
-        );
-
+      if (submitLock.current) {
         return false;
       }
 
-      if (
-        quantity < 1 ||
-        quantity > maximumQuantity ||
-        quantity > 99
-      ) {
-        setErrorMessage(
-          'A quantidade selecionada é inválida.',
-        );
+      setErrorMessage('');
+      setSuccessMessage('');
+
+      const quantityError = validateQuantity(
+        quantity,
+        maximumQuantity,
+      );
+
+      if (quantityError) {
+        setErrorMessage(quantityError);
 
         return false;
       }
 
       try {
+        submitLock.current = true;
         setLoading(true);
 
         await cartService.addItem({
@@ -133,6 +138,7 @@ export function useAddToCart({
 
         return false;
       } finally {
+        submitLock.current = false;
         setLoading(false);
       }
     },

@@ -33,12 +33,28 @@ const AppTextField = forwardRef<TextInput, AppTextFieldProps>(
       style,
       editable = true,
       multiline,
+      submitBehavior,
+      blurOnSubmit,
       ...props
     },
     ref,
   ) {
     const labelId = useId();
     const android = Platform.OS === 'android';
+
+    /*
+     * O React Native usa submitBehavior; o react-native-web ainda lê
+     * blurOnSubmit. Derivar um do outro mantém o encadeamento de foco
+     * igual no Android, iOS e web.
+     */
+    const resolvedBlurOnSubmit =
+      blurOnSubmit ??
+      (submitBehavior ? submitBehavior !== 'submit' : undefined);
+
+    /* O erro também vai na dica, para ser lido ao focar o campo. */
+    const accessibilityHint = errorMessage
+      ? `Erro: ${errorMessage}`
+      : helperText;
 
     return (
       <View style={styles.container}>
@@ -56,6 +72,8 @@ const AppTextField = forwardRef<TextInput, AppTextFieldProps>(
             {...props}
             editable={editable}
             multiline={multiline}
+            submitBehavior={submitBehavior}
+            blurOnSubmit={resolvedBlurOnSubmit}
             placeholderTextColor={colors.textMuted}
             style={[
               authStyles.input,
@@ -67,7 +85,7 @@ const AppTextField = forwardRef<TextInput, AppTextFieldProps>(
             ]}
             accessibilityLabel={android ? undefined : label}
             accessibilityLabelledBy={android ? labelId : undefined}
-            accessibilityHint={helperText}
+            accessibilityHint={accessibilityHint}
             accessibilityState={{ disabled: !editable }}
           />
 

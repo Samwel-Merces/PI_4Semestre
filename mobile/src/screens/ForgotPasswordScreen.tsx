@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+
 import {
   SafeAreaView,
   Text,
@@ -7,12 +9,16 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import AppButton from '../components/AppButton';
-import AppTextField from '../components/AppTextField';
+import AppTextField, {
+  type TextFieldRef,
+} from '../components/AppTextField';
 import FeedbackMessage from '../components/FeedbackMessage';
+import FormScrollView from '../components/FormScrollView';
 import ScreenTitle from '../components/ScreenTitle';
 import { useForgotPassword } from '../hooks/useForgotPassword';
 import { authStyles as styles } from '../theme/authStyles';
 import type { AuthStackParamList } from '../types/navigation';
+import { limits } from '../utils/validacoes';
 
 type Props = NativeStackScreenProps<
   AuthStackParamList,
@@ -23,29 +29,38 @@ export default function ForgotPasswordScreen({
   navigation,
 }: Props) {
   const {
-    email,
+    form,
     loading,
     errorMessage,
     successMessage,
-    setEmail,
     handleForgotPassword,
   } = useForgotPassword();
 
-  async function onForgotPasswordPress() {
-    const result = await handleForgotPassword();
+  const emailRef = useRef<TextFieldRef>(null);
 
-    if (!result?.token) {
+  async function onForgotPasswordPress() {
+    const outcome = await handleForgotPassword();
+
+    if (!outcome.ok) {
+      if (outcome.invalidField) {
+        emailRef.current?.focus();
+      }
+
+      return;
+    }
+
+    if (!outcome.result.token) {
       return;
     }
 
     navigation.navigate('ResetPassword', {
-      token: result.token,
+      token: outcome.result.token,
     });
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <FormScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.logo}>
           PETSHOP
         </Text>
@@ -61,25 +76,28 @@ export default function ForgotPasswordScreen({
 
         <View style={styles.form}>
           <AppTextField
+            ref={emailRef}
             label="E-mail"
-            style={errorMessage ? styles.inputError : undefined}
             placeholder="nome@exemplo.com"
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="email"
             textContentType="emailAddress"
-            value={email}
-            onChangeText={setEmail}
+            maxLength={limits.emailMax}
+            {...form.fieldProps('email')}
+            onChangeText={(value) => form.setValue('email', value)}
             editable={!loading}
             returnKeyType="send"
-            onSubmitEditing={onForgotPasswordPress}
+            submitBehavior="blurAndSubmit"
+            onSubmitEditing={() => {
+              void onForgotPasswordPress();
+            }}
           />
 
           <FeedbackMessage
             kind="error"
             message={errorMessage}
-            style={styles.errorText}
           />
 
           <FeedbackMessage
@@ -93,7 +111,9 @@ export default function ForgotPasswordScreen({
             label="Enviar recuperação"
             loading={loading}
             loadingLabel="Enviando..."
-            onPress={onForgotPasswordPress}
+            onPress={() => {
+              void onForgotPasswordPress();
+            }}
             style={{ marginTop: 8 }}
           />
 
@@ -104,7 +124,7 @@ export default function ForgotPasswordScreen({
             onPress={() => navigation.goBack()}
           />
         </View>
-      </View>
+      </FormScrollView>
     </SafeAreaView>
   );
 }

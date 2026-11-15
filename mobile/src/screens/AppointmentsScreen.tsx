@@ -169,7 +169,7 @@ export default function AppointmentsScreen({
         title="Meus agendamentos"
         onBack={() => navigation.goBack()}
         actionLabel="Novo agendamento"
-        onAction={() => navigation.navigate('Services')}
+        onAction={() => navigation.popTo('Services')}
       />
 
       {loading ||

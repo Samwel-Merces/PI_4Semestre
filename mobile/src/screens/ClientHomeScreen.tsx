@@ -5,7 +5,6 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,6 +14,7 @@ import type {
 } from '@react-navigation/native-stack';
 
 import AppButton from '../components/AppButton';
+import AppTextField from '../components/AppTextField';
 import ChipGroup from '../components/ChipGroup';
 import FeedbackMessage from '../components/FeedbackMessage';
 import LoadingIndicator from '../components/LoadingIndicator';
@@ -32,8 +32,6 @@ import {
   type Product,
   type Species,
 } from '../types/product';
-
-import { colors } from '../theme/tokens';
 
 import {
   formatCurrency,
@@ -219,15 +217,17 @@ export default function ClientHomeScreen({
       {offline ? <OfflineNotice /> : null}
 
       <View style={styles.filters}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar produto"
-          placeholderTextColor="#64748B"
+        <AppTextField
+          label="Buscar produto"
+          placeholder="Nome do produto"
           value={search}
           onChangeText={setSearch}
+          autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="off"
+          maxLength={120}
           returnKeyType="search"
-          accessibilityLabel="Buscar produto"
+          submitBehavior="blurAndSubmit"
           accessibilityRole="search"
         />
 
@@ -302,16 +302,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     gap: 10,
-  },
-  searchInput: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.borderControl,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: '#1E293B',
-    backgroundColor: '#FFFFFF',
   },
   container: {
     flex: 1,

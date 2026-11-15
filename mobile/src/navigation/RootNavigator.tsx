@@ -13,6 +13,7 @@ import { useAuth } from '../hooks/useAuth';
 import AuthNavigator from './AuthNavigator';
 import ClientNavigator from './ClientNavigator';
 import AdminNavigator from './AdminNavigator';
+import { resolveNavigator } from './resolveNavigator';
 
 function SessionLoadingScreen() {
   return (
@@ -31,19 +32,28 @@ function SessionLoadingScreen() {
 export default function RootNavigator() {
   const {
     user,
-    isAuthenticated,
     isLoadingSession,
   } = useAuth();
 
-  if (isLoadingSession) {
+  const navigator = resolveNavigator(
+    isLoadingSession,
+    user,
+  );
+
+  if (navigator === 'loading') {
     return <SessionLoadingScreen />;
   }
 
+  /*
+   * Cada perfil tem sua própria pilha. Ao entrar, sair ou perder a sessão,
+   * a pilha anterior é desmontada inteira: o botão Voltar nunca retorna ao
+   * login depois de autenticar nem à área logada depois do logout.
+   */
   return (
     <NavigationContainer>
-      {!isAuthenticated || !user ? (
+      {navigator === 'auth' ? (
         <AuthNavigator />
-      ) : user.role === 'ADMIN' ? (
+      ) : navigator === 'admin' ? (
         <AdminNavigator />
       ) : (
         <ClientNavigator />

@@ -19,6 +19,7 @@ import LoadingIndicator from '../components/LoadingIndicator';
 import OrderTimeline from '../components/OrderTimeline';
 import ScreenTitle from '../components/ScreenTitle';
 import { useOrderDetails } from '../hooks/useOrderDetails';
+import { navigateWithoutDuplicate } from '../navigation/stackHelpers';
 
 import type {
   ClientStackParamList,
@@ -93,7 +94,9 @@ export default function OrderDetailsScreen({
             variant="outline"
             label="Ver meus pedidos"
             style={{ marginTop: 8 }}
-            onPress={() => navigation.navigate('Orders')}
+            onPress={() =>
+            navigateWithoutDuplicate(navigation, 'Orders')
+          }
           />
         </View>
       </SafeAreaView>
@@ -106,7 +109,9 @@ export default function OrderDetailsScreen({
         <BackButton
           label="Pedidos"
           accessibilityLabel="Voltar para Pedidos"
-          onPress={() => navigation.navigate('Orders')}
+          onPress={() =>
+            navigateWithoutDuplicate(navigation, 'Orders')
+          }
         />
 
         <Text style={styles.headerTitle}>
@@ -208,7 +213,9 @@ export default function OrderDetailsScreen({
           size="large"
           label="Voltar ao catálogo"
           style={styles.catalogButton}
-          onPress={() => navigation.navigate('ClientHome')}
+          onPress={() =>
+            navigateWithoutDuplicate(navigation, 'ClientHome')
+          }
         />
       </ScrollView>
     </SafeAreaView>

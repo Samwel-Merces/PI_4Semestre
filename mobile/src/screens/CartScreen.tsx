@@ -19,6 +19,7 @@ import FeedbackMessage from '../components/FeedbackMessage';
 import LoadingIndicator from '../components/LoadingIndicator';
 import ScreenTitle from '../components/ScreenTitle';
 import { useCart } from '../hooks/useCart';
+import { navigateWithoutDuplicate } from '../navigation/stackHelpers';
 import { colors } from '../theme/tokens';
 import { confirmAction } from '../utils/confirm';
 
@@ -33,6 +34,7 @@ import type {
 import {
   formatCurrency,
 } from '../utils/currency';
+import { limits } from '../utils/validacoes';
 
 type Props = NativeStackScreenProps<
   ClientStackParamList,
@@ -48,7 +50,7 @@ export default function CartScreen({
       return;
     }
 
-    navigation.navigate('ClientHome');
+    navigateWithoutDuplicate(navigation, 'ClientHome');
   }
   const {
     cart,
@@ -171,7 +173,7 @@ export default function CartScreen({
                   processing ||
                   !item.product.active ||
                   item.quantity >= item.product.stock ||
-                  item.quantity >= 99
+                  item.quantity >= limits.cartQuantityMax
                 }
                 onPress={() => {
                   void incrementItem(item);
@@ -183,7 +185,7 @@ export default function CartScreen({
                     processing ||
                     !item.product.active ||
                     item.quantity >= item.product.stock ||
-                    item.quantity >= 99,
+                    item.quantity >= limits.cartQuantityMax,
                 }}
               >
                 <Text style={styles.quantityButtonText}>
@@ -206,6 +208,10 @@ export default function CartScreen({
             }}
             accessibilityRole="button"
             accessibilityLabel={`Remover ${item.product.name} do carrinho`}
+            accessibilityState={{
+              disabled: processing,
+              busy: processing,
+            }}
           >
             <Text style={styles.removeText}>
               Remover
@@ -276,6 +282,7 @@ export default function CartScreen({
           }
           accessibilityState={{
             disabled: cart.items.length === 0 || clearing,
+            busy: clearing,
           }}
         >
           <Text
@@ -336,7 +343,9 @@ export default function CartScreen({
 
             <AppButton
               label="Ver produtos"
-              onPress={() => navigation.navigate('ClientHome')}
+              onPress={() =>
+                navigateWithoutDuplicate(navigation, 'ClientHome')
+              }
             />
           </View>
         }

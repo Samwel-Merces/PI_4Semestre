@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -9,24 +10,51 @@ import type { PetSize } from '../types/pet';
 import type { Species } from '../types/product';
 
 import { getApiErrorMessage } from '../utils/error';
+import { runExclusive, type SubmitOutcome } from '../utils/form';
+
+import {
+  validatePetForm,
+  type PetTextValues,
+} from '../utils/formRules';
 
 import {
   formatBirthDate,
+  normalizeName,
+  normalizeOptionalText,
   parseBirthDate,
   parseWeight,
 } from '../utils/validacoes';
 
+import { useFormState } from './useFormState';
+
+export type PetFormValues = PetTextValues & {
+  species: Species;
+  size: PetSize;
+};
+
+const emptyPet: PetFormValues = {
+  name: '',
+  species: 'CAO',
+  breed: '',
+  size: 'M',
+  birthDate: '',
+  weight: '',
+  notes: '',
+};
+
 export function usePetForm(petId?: string) {
-  const [name, setName] = useState('');
-  const [species, setSpecies] = useState<Species>('CAO');
-  const [breed, setBreed] = useState('');
-  const [size, setSize] = useState<PetSize>('M');
-  const [birthDate, setBirthDate] = useState('');
-  const [weight, setWeight] = useState('');
-  const [notes, setNotes] = useState('');
+  const form = useFormState<PetFormValues>({
+    initialValues: emptyPet,
+    validate: validatePetForm,
+  });
+
+  const { reset } = form;
+
   const [loading, setLoading] = useState(Boolean(petId));
-  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+
+  const removeLock = useRef(false);
 
   useEffect(() => {
     if (!petId) {
@@ -36,17 +64,18 @@ export function usePetForm(petId?: string) {
     petService
       .findById(petId)
       .then((pet) => {
-        setName(pet.name);
-        setSpecies(pet.species);
-        setBreed(pet.breed ?? '');
-        setSize(pet.size);
-        setBirthDate(formatBirthDate(pet.birthDate));
-        setWeight(
-          pet.weightKg === null
-            ? ''
-            : String(pet.weightKg).replace('.', ','),
-        );
-        setNotes(pet.notes ?? '');
+        reset({
+          name: pet.name,
+          species: pet.species,
+          breed: pet.breed ?? '',
+          size: pet.size,
+          birthDate: formatBirthDate(pet.birthDate),
+          weight:
+            pet.weightKg === null
+              ? ''
+              : String(pet.weightKg).replace('.', ','),
+          notes: pet.notes ?? '',
+        });
       })
       .catch((error: unknown) => {
         setErrorMessage(
@@ -57,69 +86,61 @@ export function usePetForm(petId?: string) {
         );
       })
       .finally(() => setLoading(false));
-  }, [petId]);
+  }, [petId, reset]);
 
-  async function save(): Promise<boolean> {
-    setErrorMessage('');
+  async function save(): Promise<
+    SubmitOutcome<keyof PetFormValues>
+  > {
+    const invalidField = form.validateAll();
 
-    if (name.trim().length < 2) {
-      setErrorMessage(
-        'O nome deve possuir pelo menos 2 caracteres.',
-      );
+    const birthDate = parseBirthDate(form.values.birthDate);
+    const weightKg = parseWeight(form.values.weight);
 
-      return false;
+    if (
+      invalidField ||
+      birthDate === undefined ||
+      weightKg === undefined
+    ) {
+      setErrorMessage('');
+
+      return { ok: false, invalidField };
     }
 
-    const parsedBirthDate = parseBirthDate(birthDate);
+    const outcome = await form.submit(async () => {
+      setErrorMessage('');
 
-    if (parsedBirthDate === undefined) {
-      setErrorMessage(
-        'Informe o nascimento no formato DD/MM/AAAA.',
-      );
+      const data = {
+        name: normalizeName(form.values.name),
+        species: form.values.species,
+        breed: normalizeOptionalText(form.values.breed),
+        size: form.values.size,
+        birthDate,
+        weightKg,
+        notes: normalizeOptionalText(form.values.notes),
+      };
 
-      return false;
-    }
+      try {
+        if (petId) {
+          await petService.update(petId, data);
+        } else {
+          await petService.create(data);
+        }
 
-    const parsedWeight = parseWeight(weight);
+        return { ok: true as const, result: true as const };
+      } catch (error: unknown) {
+        const { message, invalidField: apiField } =
+          form.applyApiError(
+            error,
+            'Não foi possível salvar o pet.',
+          );
 
-    if (parsedWeight === undefined) {
-      setErrorMessage('Informe um peso válido.');
+        setErrorMessage(message);
 
-      return false;
-    }
-
-    const data = {
-      name: name.trim(),
-      species,
-      breed: breed.trim() || null,
-      size,
-      birthDate: parsedBirthDate,
-      weightKg: parsedWeight,
-      notes: notes.trim() || null,
-    };
-
-    try {
-      setSaving(true);
-
-      if (petId) {
-        await petService.update(petId, data);
-      } else {
-        await petService.create(data);
+        return { ok: false as const, invalidField: apiField };
       }
+    });
 
-      return true;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível salvar o pet.',
-        ),
-      );
-
-      return false;
-    } finally {
-      setSaving(false);
-    }
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   async function remove(): Promise<boolean> {
@@ -127,45 +148,36 @@ export function usePetForm(petId?: string) {
       return false;
     }
 
-    try {
-      setSaving(true);
-      setErrorMessage('');
+    const removed = await runExclusive(removeLock, async () => {
+      try {
+        setRemoving(true);
+        setErrorMessage('');
 
-      await petService.remove(petId);
+        await petService.remove(petId);
 
-      return true;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível excluir o pet.',
-        ),
-      );
+        return true;
+      } catch (error: unknown) {
+        setErrorMessage(
+          getApiErrorMessage(
+            error,
+            'Não foi possível excluir o pet.',
+          ),
+        );
 
-      return false;
-    } finally {
-      setSaving(false);
-    }
+        return false;
+      } finally {
+        setRemoving(false);
+      }
+    });
+
+    return removed ?? false;
   }
 
   return {
-    name,
-    species,
-    breed,
-    size,
-    birthDate,
-    weight,
-    notes,
+    form,
     loading,
-    saving,
+    saving: form.submitting || removing,
     errorMessage,
-    setName,
-    setSpecies,
-    setBreed,
-    setSize,
-    setBirthDate,
-    setWeight,
-    setNotes,
     save,
     remove,
   };

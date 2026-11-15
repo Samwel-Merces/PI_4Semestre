@@ -13,11 +13,18 @@ import AppTextField, {
   type TextFieldRef,
 } from '../components/AppTextField';
 import FeedbackMessage from '../components/FeedbackMessage';
+import FormScrollView from '../components/FormScrollView';
 import PasswordInput from '../components/PasswordInput';
 import ScreenTitle from '../components/ScreenTitle';
+import { useDiscardConfirmation } from '../hooks/useDiscardConfirmation';
 import { useRegister } from '../hooks/useRegister';
 import { authStyles as styles } from '../theme/authStyles';
 import type { AuthStackParamList } from '../types/navigation';
+import { focusField } from '../utils/form';
+import {
+  formatPhone,
+  limits,
+} from '../utils/validacoes';
 
 type Props = NativeStackScreenProps<
   AuthStackParamList,
@@ -28,42 +35,54 @@ export default function RegisterScreen({
   navigation,
 }: Props) {
   const {
-    name,
-    email,
-    phone,
-    password,
-    passwordConfirmation,
+    form,
     loading,
     errorMessage,
-    successMessage,
-    setName,
-    setEmail,
-    setPhone,
-    setPassword,
-    setPasswordConfirmation,
     handleRegister,
   } = useRegister();
 
+  const { allowLeave } = useDiscardConfirmation(form.isDirty);
+
+  const nameRef = useRef<TextFieldRef>(null);
   const emailRef = useRef<TextFieldRef>(null);
   const phoneRef = useRef<TextFieldRef>(null);
   const passwordRef = useRef<TextFieldRef>(null);
   const confirmationRef = useRef<TextFieldRef>(null);
 
-  const errorStyle = errorMessage ? styles.inputError : undefined;
-
   async function onRegisterPress() {
-    const registered = await handleRegister();
+    const outcome = await handleRegister();
 
-    if (!registered) {
+    if (!outcome.ok) {
+      focusField(
+        {
+          name: nameRef,
+          email: emailRef,
+          phone: phoneRef,
+          password: passwordRef,
+          passwordConfirmation: confirmationRef,
+        },
+        outcome.invalidField,
+      );
+
       return;
     }
 
-    navigation.replace('Login');
+    /*
+     * Volta para o login já existente na pilha (sem empilhar outro),
+     * com o e-mail preenchido e a mensagem de sucesso.
+     */
+    allowLeave();
+
+    navigation.popTo('Login', {
+      email: outcome.result,
+      successMessage:
+        'Cadastro realizado com sucesso. Entre com sua senha.',
+    });
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <FormScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.logo}>PETSHOP</Text>
 
         <ScreenTitle style={styles.title}>Criar conta</ScreenTitle>
@@ -74,96 +93,95 @@ export default function RegisterScreen({
 
         <View style={styles.form}>
           <AppTextField
+            ref={nameRef}
             label="Nome completo"
-            style={errorStyle}
             placeholder="Maria da Silva"
-            value={name}
-            onChangeText={setName}
+            {...form.fieldProps('name')}
+            onChangeText={(value) => form.setValue('name', value)}
             autoCapitalize="words"
             autoCorrect={false}
             autoComplete="name"
             textContentType="name"
+            maxLength={limits.userNameMax}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => emailRef.current?.focus()}
           />
 
           <AppTextField
             ref={emailRef}
             label="E-mail"
-            style={errorStyle}
             placeholder="nome@exemplo.com"
-            value={email}
-            onChangeText={setEmail}
+            {...form.fieldProps('email')}
+            onChangeText={(value) => form.setValue('email', value)}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="email"
             textContentType="emailAddress"
+            maxLength={limits.emailMax}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => phoneRef.current?.focus()}
           />
 
           <AppTextField
             ref={phoneRef}
             label="Telefone"
-            style={errorStyle}
-            placeholder="11 91234-5678"
+            placeholder="(11) 91234-5678"
             helperText="Com DDD."
-            value={phone}
-            onChangeText={setPhone}
+            {...form.fieldProps('phone')}
+            onChangeText={(value) =>
+              form.setValue('phone', formatPhone(value))
+            }
             keyboardType="phone-pad"
             autoComplete="tel"
             textContentType="telephoneNumber"
-            maxLength={15}
+            maxLength={limits.phoneInputMax}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => passwordRef.current?.focus()}
           />
 
           <PasswordInput
             ref={passwordRef}
             label="Senha"
-            style={errorStyle}
             placeholder="Digite sua senha"
+            helperText="De 8 a 72 caracteres."
             autoComplete="new-password"
             textContentType="newPassword"
-            value={password}
-            onChangeText={setPassword}
+            {...form.fieldProps('password')}
+            onChangeText={(value) => form.setValue('password', value)}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => confirmationRef.current?.focus()}
           />
 
           <PasswordInput
             ref={confirmationRef}
             label="Confirmar senha"
-            style={errorStyle}
             placeholder="Repita a senha"
             autoComplete="new-password"
             textContentType="newPassword"
-            value={passwordConfirmation}
-            onChangeText={setPasswordConfirmation}
+            {...form.fieldProps('passwordConfirmation')}
+            onChangeText={(value) =>
+              form.setValue('passwordConfirmation', value)
+            }
             editable={!loading}
             returnKeyType="done"
-            onSubmitEditing={onRegisterPress}
+            submitBehavior="blurAndSubmit"
+            onSubmitEditing={() => {
+              void onRegisterPress();
+            }}
           />
 
           <FeedbackMessage
             kind="error"
             message={errorMessage}
-            style={styles.errorText}
-          />
-
-          <FeedbackMessage
-            kind="success"
-            message={successMessage}
-            style={styles.successText}
           />
 
           <AppButton
@@ -171,7 +189,9 @@ export default function RegisterScreen({
             label="Cadastrar"
             loading={loading}
             loadingLabel="Cadastrando..."
-            onPress={onRegisterPress}
+            onPress={() => {
+              void onRegisterPress();
+            }}
             style={{ marginTop: 8 }}
           />
 
@@ -182,7 +202,7 @@ export default function RegisterScreen({
             onPress={() => navigation.goBack()}
           />
         </View>
-      </View>
+      </FormScrollView>
     </SafeAreaView>
   );
 }

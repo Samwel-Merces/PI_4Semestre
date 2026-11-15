@@ -21,6 +21,7 @@ import AppButton from '../components/AppButton';
 import ScreenTitle from '../components/ScreenTitle';
 import { useAuth } from '../hooks/useAuth';
 import { commonStyles as styles } from '../theme/commonStyles';
+import { formatPhone } from '../utils/validacoes';
 
 import type { ClientStackParamList } from '../types/navigation';
 
@@ -54,7 +55,7 @@ export default function ProfileScreen({ navigation }: Props) {
   ];
 
   const phoneText = user?.phone
-    ? user.phone
+    ? formatPhone(user.phone)
     : 'Telefone não informado';
 
   return (

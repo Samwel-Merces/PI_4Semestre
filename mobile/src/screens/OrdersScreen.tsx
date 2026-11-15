@@ -19,6 +19,7 @@ import FeedbackMessage from '../components/FeedbackMessage';
 import LoadingIndicator from '../components/LoadingIndicator';
 import ScreenTitle from '../components/ScreenTitle';
 import { useOrders } from '../hooks/useOrders';
+import { navigateWithoutDuplicate } from '../navigation/stackHelpers';
 
 import type {
   ClientStackParamList,
@@ -56,7 +57,7 @@ export default function OrdersScreen({
       return;
     }
 
-    navigation.navigate('ClientHome');
+    navigateWithoutDuplicate(navigation, 'ClientHome');
   }
   const {
     orders,
@@ -234,7 +235,9 @@ export default function OrdersScreen({
 
             <AppButton
               label="Ver produtos"
-              onPress={() => navigation.navigate('ClientHome')}
+              onPress={() =>
+                navigateWithoutDuplicate(navigation, 'ClientHome')
+              }
             />
           </View>
         }

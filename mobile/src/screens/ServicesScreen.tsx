@@ -14,6 +14,7 @@ import AppButton from '../components/AppButton';
 import ListState from '../components/ListState';
 import ScreenHeader from '../components/ScreenHeader';
 import { useRemoteList } from '../hooks/useRemoteList';
+import { navigateWithoutDuplicate } from '../navigation/stackHelpers';
 import { serviceService } from '../services/service.service';
 import { commonStyles as styles } from '../theme/commonStyles';
 import { formatCurrency } from '../utils/currency';
@@ -35,7 +36,7 @@ export default function ServicesScreen({
       return;
     }
 
-    navigation.navigate('ClientHome');
+    navigateWithoutDuplicate(navigation, 'ClientHome');
   }
   const {
     items: services,

@@ -6,9 +6,14 @@ import {
   authService,
 } from '../services/auth.service';
 
+import { useFormState } from './useFormState';
+
+import type { SubmitOutcome } from '../utils/form';
+
 import {
-  getApiErrorMessage,
-} from '../utils/error';
+  validateResetPasswordForm,
+  type ResetPasswordValues,
+} from '../utils/formRules';
 
 interface UseResetPasswordProps {
   token: string;
@@ -17,120 +22,73 @@ interface UseResetPasswordProps {
 export function useResetPassword({
   token,
 }: UseResetPasswordProps) {
-  const [password, setPassword] =
-    useState('');
-
-  const [
-    passwordConfirmation,
-    setPasswordConfirmation,
-  ] = useState('');
-
-  const [loading, setLoading] =
-    useState(false);
+  const form = useFormState<ResetPasswordValues>({
+    initialValues: {
+      password: '',
+      passwordConfirmation: '',
+    },
+    validate: validateResetPasswordForm,
+  });
 
   const [
     errorMessage,
     setErrorMessage,
   ] = useState('');
 
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState('');
+  /* Em caso de sucesso, devolve a mensagem para exibir no login. */
+  async function handleResetPassword(): Promise<
+    SubmitOutcome<keyof ResetPasswordValues, string>
+  > {
+    const invalidField = form.validateAll();
 
-  function validateForm():
-    string | null {
+    if (invalidField) {
+      setErrorMessage('');
+
+      return { ok: false, invalidField };
+    }
+
     if (!token) {
-      return (
-        'Token de recuperação não informado.'
-      );
+      setErrorMessage('Token de recuperação não informado.');
+
+      return { ok: false, invalidField: null };
     }
 
-    if (password.length < 8) {
-      return (
-        'A senha deve possuir pelo menos ' +
-        '8 caracteres.'
-      );
-    }
+    const outcome = await form.submit(async () => {
+      setErrorMessage('');
 
-    if (password.length > 72) {
-      return (
-        'A senha deve possuir no máximo ' +
-        '72 caracteres.'
-      );
-    }
+      try {
+        const result =
+          await authService.resetPassword({
+            token,
+            password: form.values.password,
+          });
 
-    if (!passwordConfirmation) {
-      return (
-        'Confirme a nova senha.'
-      );
-    }
+        return {
+          ok: true as const,
+          result:
+            result.message ||
+            'Senha alterada com sucesso.',
+        };
+      } catch (error: unknown) {
+        const { message, invalidField: apiField } =
+          form.applyApiError(
+            error,
+            'Não foi possível alterar a senha.',
+          );
 
-    if (
-      password !==
-      passwordConfirmation
-    ) {
-      return (
-        'As senhas não são iguais.'
-      );
-    }
+        setErrorMessage(message);
 
-    return null;
-  }
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
 
-  async function handleResetPassword():
-    Promise<boolean> {
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    const validationError =
-      validateForm();
-
-    if (validationError) {
-      setErrorMessage(
-        validationError,
-      );
-
-      return false;
-    }
-
-    try {
-      setLoading(true);
-
-      const result =
-        await authService.resetPassword({
-          token,
-          password,
-        });
-
-      setSuccessMessage(
-        result.message ||
-          'Senha alterada com sucesso.',
-      );
-
-      return true;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível alterar a senha.',
-        ),
-      );
-
-      return false;
-    } finally {
-      setLoading(false);
-    }
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   return {
-    password,
-    passwordConfirmation,
-    loading,
+    form,
+    loading: form.submitting,
     errorMessage,
-    successMessage,
-    setPassword,
-    setPasswordConfirmation,
     handleResetPassword,
   };
 }

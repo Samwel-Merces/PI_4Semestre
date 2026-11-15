@@ -5,7 +5,6 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,6 +14,7 @@ import type {
 } from '@react-navigation/native-stack';
 
 import AppButton from '../components/AppButton';
+import AppTextField from '../components/AppTextField';
 import BackButton from '../components/BackButton';
 import ChipGroup from '../components/ChipGroup';
 import FeedbackMessage from '../components/FeedbackMessage';
@@ -173,22 +173,16 @@ export default function AdminProductsScreen({
           </Text>
 
           <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.editButton}
-              activeOpacity={0.8}
+            <AppButton
+              label="Editar"
+              accessibilityLabel={`Editar ${item.name}`}
               disabled={processing}
               onPress={() =>
                 navigation.navigate('EditProduct', {
                   productId: item.id,
                 })
               }
-              accessibilityRole="button"
-              accessibilityLabel={`Editar ${item.name}`}
-            >
-              <Text style={styles.editButtonText}>
-                Editar
-              </Text>
-            </TouchableOpacity>
+            />
 
             <TouchableOpacity
               style={[
@@ -224,20 +218,15 @@ export default function AdminProductsScreen({
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.deleteButton}
-              activeOpacity={0.8}
+            <AppButton
+              variant="danger"
+              label="Excluir"
+              accessibilityLabel={`Excluir ${item.name}`}
               disabled={processing}
               onPress={() => {
                 void handleDelete(item);
               }}
-              accessibilityRole="button"
-              accessibilityLabel={`Excluir ${item.name}`}
-            >
-              <Text style={styles.deleteButtonText}>
-                Excluir
-              </Text>
-            </TouchableOpacity>
+            />
           </View>
         </View>
       </View>
@@ -302,29 +291,27 @@ export default function AdminProductsScreen({
           </Text>
         </View>
 
-        <TouchableOpacity
+        <AppButton
+          label="Novo produto"
           style={styles.createButton}
-          activeOpacity={0.8}
           onPress={() => navigation.navigate('CreateProduct')}
-          accessibilityRole="button"
-          accessibilityLabel="Novo produto"
-        >
-          <Text style={styles.createButtonText}>
-            Novo
-          </Text>
-        </TouchableOpacity>
-
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar produto"
-          placeholderTextColor="#64748B"
-          value={search}
-          onChangeText={setSearch}
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Buscar produto"
-          accessibilityRole="search"
         />
+
+        <View style={styles.searchField}>
+          <AppTextField
+            label="Buscar produto"
+            placeholder="Nome do produto"
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            maxLength={120}
+            returnKeyType="search"
+            submitBehavior="blurAndSubmit"
+            accessibilityRole="search"
+          />
+        </View>
 
         <ChipGroup<ProductStatusFilter>
           groupLabel="Filtrar produtos por situação"
@@ -421,44 +408,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   createButton: {
-    minHeight: 48,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    backgroundColor: '#2D6CDF',
     alignSelf: 'flex-start',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  createButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  searchInput: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: '#738298',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: '#1E293B',
-    backgroundColor: '#FFFFFF',
+  searchField: {
     marginTop: 14,
     marginBottom: 12,
-  },
-  deleteButton: {
-    minHeight: 48,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#DC2626',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteButtonText: {
-    color: '#DC2626',
-    fontSize: 14,
-    fontWeight: '700',
   },
   listContent: {
     width: '100%',
@@ -527,21 +481,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 14,
-  },
-  editButton: {
-    minWidth: 82,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#2D6CDF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  editButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
   },
   statusButton: {
     minWidth: 90,

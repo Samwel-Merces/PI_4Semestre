@@ -18,6 +18,17 @@ export const authStyles = StyleSheet.create({
     paddingVertical: 32,
   },
 
+  /* Igual a "content", mas pode crescer além da tela dentro de ScrollView. */
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+
   logo: {
     fontSize: 32,
     fontWeight: '700',

@@ -6,171 +6,94 @@ import {
   authService,
 } from '../services/auth.service';
 
-import {
-  getApiErrorMessage,
-} from '../utils/error';
+import { useFormState } from './useFormState';
 
 import {
-  isValidPhone,
+  getApiErrorCode,
+} from '../utils/error';
+
+import type { SubmitOutcome } from '../utils/form';
+
+import {
+  validateRegisterForm,
+  type RegisterValues,
+} from '../utils/formRules';
+
+import {
+  normalizeEmail,
+  normalizeName,
+  normalizePhone,
 } from '../utils/validacoes';
 
 export function useRegister() {
-  const [name, setName] =
-    useState('');
-
-  const [email, setEmail] =
-    useState('');
-
-  const [phone, setPhone] =
-    useState('');
-
-  const [password, setPassword] =
-    useState('');
-
-  const [
-    passwordConfirmation,
-    setPasswordConfirmation,
-  ] = useState('');
-
-  const [loading, setLoading] =
-    useState(false);
+  const form = useFormState<RegisterValues>({
+    initialValues: {
+      name: '',
+      email: '',
+      phone: '',
+      password: '',
+      passwordConfirmation: '',
+    },
+    validate: validateRegisterForm,
+  });
 
   const [
     errorMessage,
     setErrorMessage,
   ] = useState('');
 
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState('');
+  /* Em caso de sucesso, devolve o e-mail normalizado para preencher o login. */
+  async function handleRegister(): Promise<
+    SubmitOutcome<keyof RegisterValues, string>
+  > {
+    const invalidField = form.validateAll();
 
-  function validateForm():
-    string | null {
-    const normalizedName =
-      name.trim();
+    if (invalidField) {
+      setErrorMessage('');
 
-    const normalizedEmail =
-      email.trim().toLowerCase();
-
-    if (
-      normalizedName.length < 2
-    ) {
-      return (
-        'O nome deve possuir pelo menos ' +
-        '2 caracteres.'
-      );
+      return { ok: false, invalidField };
     }
 
-    const emailPattern =
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const outcome = await form.submit(async () => {
+      setErrorMessage('');
 
-    if (
-      !emailPattern.test(
-        normalizedEmail,
-      )
-    ) {
-      return 'Digite um e-mail válido.';
-    }
+      const email = normalizeEmail(form.values.email);
 
-    if (!isValidPhone(phone)) {
-      return 'Informe um telefone com DDD.';
-    }
+      try {
+        await authService.register({
+          name: normalizeName(form.values.name),
+          email,
+          phone: normalizePhone(form.values.phone),
+          password: form.values.password,
+        });
 
-    if (password.length < 8) {
-      return (
-        'A senha deve possuir pelo menos ' +
-        '8 caracteres.'
-      );
-    }
+        return { ok: true as const, result: email };
+      } catch (error: unknown) {
+        const emailInUse =
+          getApiErrorCode(error) === 'EMAIL_IN_USE';
 
-    if (password.length > 72) {
-      return (
-        'A senha deve possuir no máximo ' +
-        '72 caracteres.'
-      );
-    }
+        const { message, invalidField: apiField } =
+          form.applyApiError(
+            error,
+            'Não foi possível realizar o cadastro.',
+            emailInUse
+              ? { email: 'Este e-mail já está cadastrado.' }
+              : {},
+          );
 
-    if (!passwordConfirmation) {
-      return 'Confirme a sua senha.';
-    }
+        setErrorMessage(message);
 
-    if (
-      password !==
-      passwordConfirmation
-    ) {
-      return (
-        'As senhas não são iguais.'
-      );
-    }
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
 
-    return null;
-  }
-
-  async function handleRegister():
-    Promise<boolean> {
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    const validationError =
-      validateForm();
-
-    if (validationError) {
-      setErrorMessage(
-        validationError,
-      );
-
-      return false;
-    }
-
-    try {
-      setLoading(true);
-
-      await authService.register({
-        name: name.trim(),
-
-        email: email
-          .trim()
-          .toLowerCase(),
-
-        phone: phone.replace(/\D/g, ''),
-
-        password,
-      });
-
-      setSuccessMessage(
-        'Cadastro realizado com sucesso.',
-      );
-
-      return true;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível realizar o cadastro.',
-        ),
-      );
-
-      return false;
-    } finally {
-      setLoading(false);
-    }
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   return {
-    name,
-    email,
-    phone,
-    password,
-    passwordConfirmation,
-    loading,
+    form,
+    loading: form.submitting,
     errorMessage,
-    successMessage,
-    setName,
-    setEmail,
-    setPhone,
-    setPassword,
-    setPasswordConfirmation,
     handleRegister,
   };
 }

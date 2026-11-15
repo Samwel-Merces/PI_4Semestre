@@ -1,109 +1,91 @@
 import {
+  useEffect,
   useState,
 } from 'react';
 
 import { useAuth } from './useAuth';
+import { useFormState } from './useFormState';
+
+import type { LoginResponse } from '../types/auth';
+import type { SubmitOutcome } from '../utils/form';
 
 import {
-  getApiErrorMessage,
-} from '../utils/error';
+  validateLoginForm,
+  type LoginValues,
+} from '../utils/formRules';
 
-export function useLogin() {
+import { normalizeEmail } from '../utils/validacoes';
+
+export function useLogin(initialEmail: string = '') {
   const { signIn } = useAuth();
 
-  const [email, setEmail] =
-    useState('');
-
-  const [password, setPassword] =
-    useState('');
-
-  const [loading, setLoading] =
-    useState(false);
+  const form = useFormState<LoginValues>({
+    initialValues: {
+      email: initialEmail,
+      password: '',
+    },
+    validate: validateLoginForm,
+  });
 
   const [
     errorMessage,
     setErrorMessage,
   ] = useState('');
 
-  function validateForm():
-    string | null {
-    const normalizedEmail =
-      email.trim().toLowerCase();
+  const { reset } = form;
 
-    if (!normalizedEmail) {
-      return 'Informe o seu e-mail.';
+  /*
+   * Ao voltar do cadastro ou da redefinição de senha, a tela de login já
+   * está montada; o e-mail chega por parâmetro e substitui o formulário.
+   */
+  useEffect(() => {
+    if (initialEmail) {
+      reset({ email: initialEmail, password: '' });
+      setErrorMessage('');
+    }
+  }, [initialEmail, reset]);
+
+  async function handleLogin(): Promise<
+    SubmitOutcome<keyof LoginValues, LoginResponse>
+  > {
+    const invalidField = form.validateAll();
+
+    if (invalidField) {
+      setErrorMessage('');
+
+      return { ok: false, invalidField };
     }
 
-    const emailPattern =
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const outcome = await form.submit(async () => {
+      setErrorMessage('');
 
-    if (
-      !emailPattern.test(
-        normalizedEmail,
-      )
-    ) {
-      return 'Digite um e-mail válido.';
-    }
+      try {
+        const result = await signIn({
+          email: normalizeEmail(form.values.email),
+          password: form.values.password,
+        });
 
-    if (!password) {
-      return 'Informe a sua senha.';
-    }
+        return { ok: true as const, result };
+      } catch (error: unknown) {
+        const { message, invalidField: apiField } =
+          form.applyApiError(
+            error,
+            'Não foi possível entrar.',
+          );
 
-    if (password.length < 8) {
-      return (
-        'A senha deve possuir pelo menos ' +
-        '8 caracteres.'
-      );
-    }
+        setErrorMessage(message);
 
-    return null;
-  }
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
 
-  async function handleLogin() {
-    setErrorMessage('');
-
-    const validationError =
-      validateForm();
-
-    if (validationError) {
-      setErrorMessage(
-        validationError,
-      );
-
-      return null;
-    }
-
-    try {
-      setLoading(true);
-
-      return await signIn({
-        email: email
-          .trim()
-          .toLowerCase(),
-
-        password,
-      });
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível entrar.',
-        ),
-      );
-
-      return null;
-    } finally {
-      setLoading(false);
-    }
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   return {
-    email,
-    password,
-    loading,
+    form,
+    loading: form.submitting,
     errorMessage,
-    setEmail,
-    setPassword,
     handleLogin,
   };
 }

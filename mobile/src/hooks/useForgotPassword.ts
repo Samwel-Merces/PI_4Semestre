@@ -10,16 +10,22 @@ import type {
   ForgotPasswordResponse,
 } from '../types/auth';
 
+import { useFormState } from './useFormState';
+
+import type { SubmitOutcome } from '../utils/form';
+
 import {
-  getApiErrorMessage,
-} from '../utils/error';
+  validateForgotPasswordForm,
+  type ForgotPasswordValues,
+} from '../utils/formRules';
+
+import { normalizeEmail } from '../utils/validacoes';
 
 export function useForgotPassword() {
-  const [email, setEmail] =
-    useState('');
-
-  const [loading, setLoading] =
-    useState(false);
+  const form = useFormState<ForgotPasswordValues>({
+    initialValues: { email: '' },
+    validate: validateForgotPasswordForm,
+  });
 
   const [
     errorMessage,
@@ -31,83 +37,58 @@ export function useForgotPassword() {
     setSuccessMessage,
   ] = useState('');
 
-  function validateEmail():
-    string | null {
-    const normalizedEmail =
-      email.trim().toLowerCase();
-
-    if (!normalizedEmail) {
-      return 'Informe o seu e-mail.';
-    }
-
-    const emailPattern =
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    if (
-      !emailPattern.test(
-        normalizedEmail,
-      )
-    ) {
-      return 'Digite um e-mail válido.';
-    }
-
-    return null;
-  }
-
-  async function handleForgotPassword():
-    Promise<
-      ForgotPasswordResponse | null
-    > {
-    setErrorMessage('');
+  async function handleForgotPassword(): Promise<
+    SubmitOutcome<
+      keyof ForgotPasswordValues,
+      ForgotPasswordResponse
+    >
+  > {
     setSuccessMessage('');
 
-    const validationError =
-      validateEmail();
+    const invalidField = form.validateAll();
 
-    if (validationError) {
-      setErrorMessage(
-        validationError,
-      );
+    if (invalidField) {
+      setErrorMessage('');
 
-      return null;
+      return { ok: false, invalidField };
     }
 
-    try {
-      setLoading(true);
+    const outcome = await form.submit(async () => {
+      setErrorMessage('');
 
-      const result =
-        await authService.forgotPassword(
-          email
-            .trim()
-            .toLowerCase(),
+      try {
+        const result =
+          await authService.forgotPassword(
+            normalizeEmail(form.values.email),
+          );
+
+        setSuccessMessage(
+          result.message ||
+            'Solicitação realizada com sucesso.',
         );
 
-      setSuccessMessage(
-        result.message ||
-          'Solicitação realizada com sucesso.',
-      );
+        return { ok: true as const, result };
+      } catch (error: unknown) {
+        const { message, invalidField: apiField } =
+          form.applyApiError(
+            error,
+            'Não foi possível solicitar a recuperação.',
+          );
 
-      return result;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível solicitar a recuperação.',
-        ),
-      );
+        setErrorMessage(message);
 
-      return null;
-    } finally {
-      setLoading(false);
-    }
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
+
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   return {
-    email,
-    loading,
+    form,
+    loading: form.submitting,
     errorMessage,
     successMessage,
-    setEmail,
     handleForgotPassword,
   };
 }

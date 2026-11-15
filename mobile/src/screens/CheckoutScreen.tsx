@@ -4,7 +4,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
@@ -12,6 +11,7 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 
+import AppButton from '../components/AppButton';
 import BackButton from '../components/BackButton';
 import FeedbackMessage from '../components/FeedbackMessage';
 import LoadingIndicator from '../components/LoadingIndicator';
@@ -81,29 +81,19 @@ export default function CheckoutScreen({
             style={styles.errorText}
           />
 
-          <TouchableOpacity
-            style={styles.primaryButton}
-            activeOpacity={0.8}
+          <AppButton
+            label="Tentar novamente"
             onPress={() => {
               void reloadCart();
             }}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryButtonText}>
-              Tentar novamente
-            </Text>
-          </TouchableOpacity>
+          />
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            activeOpacity={0.7}
+          <AppButton
+            variant="link"
+            label="Voltar ao carrinho"
+            style={{ marginTop: 8 }}
             onPress={() => navigation.goBack()}
-            accessibilityRole="button"
-          >
-            <Text style={styles.secondaryButtonText}>
-              Voltar ao carrinho
-            </Text>
-          </TouchableOpacity>
+          />
         </View>
       </SafeAreaView>
     );
@@ -211,35 +201,18 @@ export default function CheckoutScreen({
           style={styles.inlineErrorText}
         />
 
-        <TouchableOpacity
-          style={[
-            styles.confirmButton,
-            confirmDisabled ? styles.disabledButton : undefined,
-          ]}
-          activeOpacity={0.8}
+        <AppButton
+          size="large"
+          label="Ir para pagamento"
+          loading={submitting}
+          loadingLabel="Abrindo pagamento..."
           disabled={confirmDisabled}
+          accessibilityHint="Abre o Mercado Pago para concluir o pagamento."
+          style={styles.confirmButton}
           onPress={() => {
             void handleStartCheckout();
           }}
-          accessibilityRole="button"
-          accessibilityLabel="Ir para pagamento"
-          accessibilityHint="Abre o Mercado Pago para concluir o pagamento."
-          accessibilityState={{
-            disabled: confirmDisabled,
-            busy: submitting,
-          }}
-        >
-          <Text
-            style={[
-              styles.confirmButtonText,
-              confirmDisabled ? styles.disabledButtonText : undefined,
-            ]}
-          >
-            {submitting
-              ? 'Abrindo pagamento...'
-              : 'Ir para pagamento'}
-          </Text>
-        </TouchableOpacity>
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -387,23 +360,7 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     width: '100%',
-    minHeight: 56,
     marginTop: 22,
-    borderRadius: 12,
-    backgroundColor: '#2D6CDF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disabledButton: {
-    backgroundColor: colors.disabledBackground,
-  },
-  disabledButtonText: {
-    color: colors.disabledText,
   },
   centeredContent: {
     flex: 1,
@@ -417,30 +374,5 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     textAlign: 'center',
     marginBottom: 20,
-  },
-  primaryButton: {
-    minHeight: 50,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    backgroundColor: '#2D6CDF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    minHeight: 48,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  secondaryButtonText: {
-    color: '#2D6CDF',
-    fontSize: 15,
-    fontWeight: '600',
   },
 });

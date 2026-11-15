@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -14,7 +15,19 @@ import type { Pet } from '../types/pet';
 import type { Service } from '../types/service';
 
 import { nextDays } from '../utils/date';
-import { getApiErrorMessage } from '../utils/error';
+import {
+  getApiErrorCode,
+  getApiErrorMessage,
+} from '../utils/error';
+import {
+  hasErrors,
+  runExclusive,
+} from '../utils/form';
+import {
+  validateBookingSelection,
+  validationMessages,
+  type BookingErrors,
+} from '../utils/validacoes';
 
 export const bookingDays = nextDays(14);
 
@@ -29,6 +42,9 @@ export function useBooking(serviceId: string) {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<BookingErrors>({});
+
+  const submitLock = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -87,38 +103,73 @@ export function useBooking(serviceId: string) {
     void loadSlots();
   }, [loadSlots]);
 
+  /* Ao trocar uma escolha, o erro daquele grupo deixa de valer. */
+  const selectPet = useCallback((value: string | null): void => {
+    setPetId(value);
+    setFieldErrors(({ petId: _removed, ...rest }) => rest);
+  }, []);
+
+  const selectDate = useCallback((value: string): void => {
+    setDate(value);
+    setFieldErrors(({ date: _removed, ...rest }) => rest);
+  }, []);
+
+  const selectSlot = useCallback((value: string | null): void => {
+    setSlot(value);
+    setFieldErrors(({ slot: _removed, ...rest }) => rest);
+  }, []);
+
   async function submit(): Promise<boolean> {
-    if (!petId || !slot) {
-      setErrorMessage('Escolha o pet e o horário.');
+    const errors = validateBookingSelection({
+      petId,
+      date,
+      slot,
+      availableSlots: slots,
+    });
 
-      return false;
-    }
+    setFieldErrors(errors);
 
-    try {
-      setSubmitting(true);
+    if (hasErrors(errors) || !petId || !slot) {
       setErrorMessage('');
 
-      await appointmentService.create({
-        petId,
-        serviceId,
-        scheduledAt: slot,
-      });
-
-      return true;
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível concluir o agendamento.',
-        ),
-      );
-
-      void loadSlots();
-
       return false;
-    } finally {
-      setSubmitting(false);
     }
+
+    const created = await runExclusive(submitLock, async () => {
+      try {
+        setSubmitting(true);
+        setErrorMessage('');
+
+        await appointmentService.create({
+          petId,
+          serviceId,
+          scheduledAt: slot,
+        });
+
+        return true;
+      } catch (error: unknown) {
+        if (getApiErrorCode(error) === 'SLOT_UNAVAILABLE') {
+          setFieldErrors({
+            slot: validationMessages.slotUnavailable,
+          });
+        }
+
+        setErrorMessage(
+          getApiErrorMessage(
+            error,
+            'Não foi possível concluir o agendamento.',
+          ),
+        );
+
+        void loadSlots();
+
+        return false;
+      } finally {
+        setSubmitting(false);
+      }
+    });
+
+    return created ?? false;
   }
 
   return {
@@ -132,9 +183,10 @@ export function useBooking(serviceId: string) {
     loadingSlots,
     submitting,
     errorMessage,
-    setPetId,
-    setDate,
-    setSlot,
+    fieldErrors,
+    setPetId: selectPet,
+    setDate: selectDate,
+    setSlot: selectSlot,
     submit,
   };
 }

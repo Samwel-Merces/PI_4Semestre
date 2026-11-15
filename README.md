@@ -63,6 +63,17 @@ npm start
 
 No celular, use o IP da máquina na rede local (não `localhost`), por exemplo `http://192.168.0.10:3000`.
 
+Verificações do mobile (não precisam da API rodando):
+
+```bash
+cd mobile
+npm run typecheck   # TypeScript do app e dos testes
+npm test            # testes das regras puras (node --test, Node 22.18+)
+npm run audit:a11y  # auditoria de acessibilidade
+```
+
+Os testes ficam em `mobile/tests/` e cobrem validações, máscaras, mapeamento de erros da API, decisão de navegador, logout e chaves do SecureStore. Usam o executor nativo do Node, sem dependências extras; por isso só testam módulos sem `react-native`.
+
 ## Credenciais de demonstração
 
 Criadas por `npm run db:seed`:
@@ -111,6 +122,9 @@ O app segue as diretrizes de acessibilidade para TalkBack (Android, prioridade) 
 | `ScreenTitle` | Título da tela (`header`) e foco do leitor ao entrar na tela |
 | `BackButton` | Botão de voltar com 48 dp |
 | `ChipGroup` | Seleção única como `radiogroup`, sempre com `groupLabel` |
+| `FormScrollView` | Contêiner de formulário que rola e mantém campo e botão acima do teclado |
+
+**Formulários** (`mobile/src/hooks/useFormState.ts`). As regras ficam em `utils/validacoes.ts` (campo) e `utils/formRules.ts` (formulário), alinhadas aos schemas Zod do backend. O erro do campo aparece após o blur ou a tentativa de envio, o envio leva o foco ao primeiro campo inválido, envios repetidos durante o carregamento são ignorados e formulários modificados pedem confirmação antes de serem descartados (`useDiscardConfirmation`).
 
 **Regras resumidas**
 

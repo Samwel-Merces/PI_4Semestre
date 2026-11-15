@@ -16,6 +16,7 @@ import FeedbackMessage from '../components/FeedbackMessage';
 import LoadingIndicator from '../components/LoadingIndicator';
 import ScreenHeader from '../components/ScreenHeader';
 import { bookingDays, useBooking } from '../hooks/useBooking';
+import { navigateWithoutDuplicate } from '../navigation/stackHelpers';
 import { commonStyles as styles } from '../theme/commonStyles';
 import { formatCurrency } from '../utils/currency';
 import {
@@ -49,7 +50,11 @@ export default function BookAppointmentScreen({
         'Seu horário foi reservado. O pagamento é feito no atendimento, na loja.',
       );
 
-      navigation.replace('Appointments');
+      /*
+       * Se "Meus agendamentos" já está na pilha, volta até ela;
+       * senão, substitui esta tela para o Voltar não reabrir o formulário.
+       */
+      navigateWithoutDuplicate(navigation, 'Appointments');
     }
   }
 
@@ -137,6 +142,12 @@ export default function BookAppointmentScreen({
             }))}
             selected={booking.petId}
             onSelect={booking.setPetId}
+            disabled={booking.submitting}
+          />
+
+          <FeedbackMessage
+            kind="error"
+            message={booking.fieldErrors.petId ?? ''}
           />
         </View>
 
@@ -156,6 +167,12 @@ export default function BookAppointmentScreen({
             onSelect={(value) =>
               value && booking.setDate(value)
             }
+            disabled={booking.submitting}
+          />
+
+          <FeedbackMessage
+            kind="error"
+            message={booking.fieldErrors.date ?? ''}
           />
         </View>
 
@@ -185,8 +202,14 @@ export default function BookAppointmentScreen({
               }))}
               selected={booking.slot}
               onSelect={booking.setSlot}
+              disabled={booking.submitting}
             />
           )}
+
+          <FeedbackMessage
+            kind="error"
+            message={booking.fieldErrors.slot ?? ''}
+          />
         </View>
 
         <View
@@ -218,7 +241,6 @@ export default function BookAppointmentScreen({
           label="Confirmar agendamento"
           loading={booking.submitting}
           loadingLabel="Agendando..."
-          disabled={!booking.slot}
           onPress={() => {
             void handleSubmit();
           }}

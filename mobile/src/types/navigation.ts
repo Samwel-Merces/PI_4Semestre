@@ -1,5 +1,13 @@
 export type AuthStackParamList = {
-  Login: undefined;
+  /*
+   * Ao voltar do cadastro ou da redefinição de senha, o login recebe
+   * o e-mail para preencher o campo e a mensagem de sucesso.
+   */
+  Login: {
+    email?: string;
+    successMessage?: string;
+  } | undefined;
+
   Register: undefined;
   ForgotPassword: undefined;
 

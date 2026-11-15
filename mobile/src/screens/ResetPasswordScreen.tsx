@@ -11,11 +11,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AppButton from '../components/AppButton';
 import FeedbackMessage from '../components/FeedbackMessage';
 import { type TextFieldRef } from '../components/AppTextField';
+import FormScrollView from '../components/FormScrollView';
 import PasswordInput from '../components/PasswordInput';
 import ScreenTitle from '../components/ScreenTitle';
+import { useDiscardConfirmation } from '../hooks/useDiscardConfirmation';
 import { useResetPassword } from '../hooks/useResetPassword';
 import { authStyles as styles } from '../theme/authStyles';
 import type { AuthStackParamList } from '../types/navigation';
+import { focusField } from '../utils/form';
 
 type Props = NativeStackScreenProps<
   AuthStackParamList,
@@ -29,36 +32,45 @@ export default function ResetPasswordScreen({
   const { token } = route.params;
 
   const {
-    password,
-    passwordConfirmation,
+    form,
     loading,
     errorMessage,
-    successMessage,
-    setPassword,
-    setPasswordConfirmation,
     handleResetPassword,
   } = useResetPassword({
     token,
   });
 
+  const { allowLeave } = useDiscardConfirmation(form.isDirty);
+
+  const passwordRef = useRef<TextFieldRef>(null);
   const confirmationRef = useRef<TextFieldRef>(null);
 
-  const errorStyle = errorMessage ? styles.inputError : undefined;
-
   async function onResetPasswordPress() {
-    const passwordWasReset =
-      await handleResetPassword();
+    const outcome = await handleResetPassword();
 
-    if (!passwordWasReset) {
+    if (!outcome.ok) {
+      focusField(
+        {
+          password: passwordRef,
+          passwordConfirmation: confirmationRef,
+        },
+        outcome.invalidField,
+      );
+
       return;
     }
 
-    navigation.popToTop();
+    /* Volta ao login existente, descartando recuperação e redefinição. */
+    allowLeave();
+
+    navigation.popTo('Login', {
+      successMessage: `${outcome.result} Entre com a nova senha.`,
+    });
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <FormScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.logo}>
           PETSHOP
         </Text>
@@ -74,48 +86,41 @@ export default function ResetPasswordScreen({
 
         <View style={styles.form}>
           <PasswordInput
+            ref={passwordRef}
             label="Nova senha"
-            style={errorStyle}
             placeholder="Digite a nova senha"
+            helperText="De 8 a 72 caracteres."
             autoComplete="new-password"
             textContentType="newPassword"
-            value={password}
-            onChangeText={setPassword}
+            {...form.fieldProps('password')}
+            onChangeText={(value) => form.setValue('password', value)}
             editable={!loading}
             returnKeyType="next"
-            blurOnSubmit={false}
+            submitBehavior="submit"
             onSubmitEditing={() => confirmationRef.current?.focus()}
           />
 
           <PasswordInput
             ref={confirmationRef}
             label="Confirmar nova senha"
-            style={errorStyle}
             placeholder="Repita a nova senha"
             autoComplete="new-password"
             textContentType="newPassword"
-            value={passwordConfirmation}
-            onChangeText={setPasswordConfirmation}
+            {...form.fieldProps('passwordConfirmation')}
+            onChangeText={(value) =>
+              form.setValue('passwordConfirmation', value)
+            }
             editable={!loading}
             returnKeyType="done"
-            onSubmitEditing={onResetPasswordPress}
+            submitBehavior="blurAndSubmit"
+            onSubmitEditing={() => {
+              void onResetPasswordPress();
+            }}
           />
-
-          <Text style={styles.helperText}>
-            A senha deve possuir pelo menos 8
-            caracteres.
-          </Text>
 
           <FeedbackMessage
             kind="error"
             message={errorMessage}
-            style={styles.errorText}
-          />
-
-          <FeedbackMessage
-            kind="success"
-            message={successMessage}
-            style={styles.successText}
           />
 
           <AppButton
@@ -123,7 +128,9 @@ export default function ResetPasswordScreen({
             label="Alterar senha"
             loading={loading}
             loadingLabel="Alterando..."
-            onPress={onResetPasswordPress}
+            onPress={() => {
+              void onResetPasswordPress();
+            }}
             style={{ marginTop: 8 }}
           />
 
@@ -131,10 +138,10 @@ export default function ResetPasswordScreen({
             variant="link"
             label="Voltar para o login"
             disabled={loading}
-            onPress={() => navigation.navigate('Login')}
+            onPress={() => navigation.popTo('Login')}
           />
         </View>
-      </View>
+      </FormScrollView>
     </SafeAreaView>
   );
 }

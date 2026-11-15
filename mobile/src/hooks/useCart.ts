@@ -20,6 +20,10 @@ import {
   getApiErrorMessage,
 } from '../utils/error';
 
+import {
+  validateQuantity,
+} from '../utils/validacoes';
+
 const emptyCart: Cart = {
   id: null,
   items: [],
@@ -148,14 +152,13 @@ export function useCart() {
     async (
       item: CartItem,
     ): Promise<boolean> => {
-      if (
-        item.quantity >=
-          item.product.stock ||
-        item.quantity >= 99
-      ) {
-        setErrorMessage(
-          'Não há estoque suficiente para aumentar a quantidade.',
-        );
+      const quantityError = validateQuantity(
+        item.quantity + 1,
+        item.product.stock,
+      );
+
+      if (quantityError) {
+        setErrorMessage(quantityError);
 
         return false;
       }

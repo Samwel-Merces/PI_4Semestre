@@ -2,116 +2,157 @@ import { useState } from 'react';
 
 import { authService } from '../services/auth.service';
 
-import { getApiErrorMessage } from '../utils/error';
-import { isValidPhone } from '../utils/validacoes';
+import { getApiErrorCode } from '../utils/error';
+import type { SubmitOutcome } from '../utils/form';
+
+import {
+  validatePasswordChangeForm,
+  validateProfileForm,
+  type PasswordChangeValues,
+  type ProfileValues,
+} from '../utils/formRules';
+
+import {
+  formatPhone,
+  normalizeName,
+  normalizePhone,
+} from '../utils/validacoes';
 
 import { useAuth } from './useAuth';
+import { useFormState } from './useFormState';
+
+const emptyPasswordChange: PasswordChangeValues = {
+  currentPassword: '',
+  newPassword: '',
+  newPasswordConfirmation: '',
+};
 
 export function useEditProfile() {
   const { user, refreshUser } = useAuth();
 
-  const [name, setName] = useState(user?.name ?? '');
-  const [phone, setPhone] = useState(user?.phone ?? '');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [saving, setSaving] = useState(false);
+  const profileForm = useFormState<ProfileValues>({
+    initialValues: {
+      name: user?.name ?? '',
+      phone: formatPhone(user?.phone ?? ''),
+    },
+    validate: validateProfileForm,
+  });
+
+  const passwordForm = useFormState<PasswordChangeValues>({
+    initialValues: emptyPasswordChange,
+    validate: validatePasswordChangeForm,
+  });
+
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  async function saveProfile(): Promise<void> {
-    setErrorMessage('');
+  const saving = profileForm.submitting || passwordForm.submitting;
+  const isDirty = profileForm.isDirty || passwordForm.isDirty;
+
+  async function saveProfile(): Promise<
+    SubmitOutcome<keyof ProfileValues>
+  > {
     setSuccessMessage('');
 
-    if (name.trim().length < 2) {
-      setErrorMessage(
-        'O nome deve possuir pelo menos 2 caracteres.',
-      );
+    const invalidField = profileForm.validateAll();
 
-      return;
+    if (invalidField) {
+      setErrorMessage('');
+
+      return { ok: false, invalidField };
     }
 
-    if (!isValidPhone(phone)) {
-      setErrorMessage('Informe um telefone com DDD.');
+    const outcome = await profileForm.submit(async () => {
+      setErrorMessage('');
 
-      return;
-    }
+      const values: ProfileValues = {
+        name: normalizeName(profileForm.values.name),
+        phone: normalizePhone(profileForm.values.phone),
+      };
 
-    try {
-      setSaving(true);
+      try {
+        await authService.updateProfile(values);
+        await refreshUser().catch(() => undefined);
 
-      await authService.updateProfile({
-        name: name.trim(),
-        phone: phone.replace(/\D/g, ''),
-      });
+        profileForm.reset({
+          name: values.name,
+          phone: formatPhone(values.phone),
+        });
 
-      await refreshUser();
+        setSuccessMessage('Dados atualizados com sucesso.');
 
-      setSuccessMessage('Dados atualizados com sucesso.');
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível atualizar os dados.',
-        ),
-      );
-    } finally {
-      setSaving(false);
-    }
+        return { ok: true as const, result: true as const };
+      } catch (error: unknown) {
+        const { message, invalidField: apiField } =
+          profileForm.applyApiError(
+            error,
+            'Não foi possível atualizar os dados.',
+          );
+
+        setErrorMessage(message);
+
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
+
+    return outcome ?? { ok: false, invalidField: null };
   }
 
-  async function changePassword(): Promise<void> {
-    setErrorMessage('');
+  async function changePassword(): Promise<
+    SubmitOutcome<keyof PasswordChangeValues>
+  > {
     setSuccessMessage('');
 
-    if (!currentPassword) {
-      setErrorMessage('Informe a senha atual.');
+    const invalidField = passwordForm.validateAll();
 
-      return;
+    if (invalidField) {
+      setErrorMessage('');
+
+      return { ok: false, invalidField };
     }
 
-    if (newPassword.length < 8 || newPassword.length > 72) {
-      setErrorMessage(
-        'A nova senha deve possuir de 8 a 72 caracteres.',
-      );
+    const outcome = await passwordForm.submit(async () => {
+      setErrorMessage('');
 
-      return;
-    }
+      try {
+        await authService.updateProfile({
+          currentPassword: passwordForm.values.currentPassword,
+          newPassword: passwordForm.values.newPassword,
+        });
 
-    try {
-      setSaving(true);
+        passwordForm.reset(emptyPasswordChange);
+        setSuccessMessage('Senha alterada com sucesso.');
 
-      await authService.updateProfile({
-        currentPassword,
-        newPassword,
-      });
+        return { ok: true as const, result: true as const };
+      } catch (error: unknown) {
+        const wrongCurrentPassword =
+          getApiErrorCode(error) === 'INVALID_CURRENT_PASSWORD';
 
-      setCurrentPassword('');
-      setNewPassword('');
-      setSuccessMessage('Senha alterada com sucesso.');
-    } catch (error: unknown) {
-      setErrorMessage(
-        getApiErrorMessage(
-          error,
-          'Não foi possível alterar a senha.',
-        ),
-      );
-    } finally {
-      setSaving(false);
-    }
+        const { message, invalidField: apiField } =
+          passwordForm.applyApiError(
+            error,
+            'Não foi possível alterar a senha.',
+            wrongCurrentPassword
+              ? { currentPassword: 'A senha atual está incorreta.' }
+              : {},
+          );
+
+        setErrorMessage(message);
+
+        return { ok: false as const, invalidField: apiField };
+      }
+    });
+
+    return outcome ?? { ok: false, invalidField: null };
   }
 
   return {
-    name,
-    phone,
-    currentPassword,
-    newPassword,
+    profileForm,
+    passwordForm,
     saving,
+    isDirty,
     errorMessage,
     successMessage,
-    setName,
-    setPhone,
-    setCurrentPassword,
-    setNewPassword,
     saveProfile,
     changePassword,
   };

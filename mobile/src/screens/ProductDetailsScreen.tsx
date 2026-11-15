@@ -35,6 +35,7 @@ import {
 import {
   formatCurrency,
 } from '../utils/currency';
+import { limits } from '../utils/validacoes';
 
 type Props = NativeStackScreenProps<
   ClientStackParamList,
@@ -75,7 +76,7 @@ export default function ProductDetailsScreen({
     const added = await addToCart();
 
     if (added) {
-      navigation.navigate('Cart');
+      navigation.popTo('Cart');
     }
   }
 
@@ -134,7 +135,7 @@ export default function ProductDetailsScreen({
         <TouchableOpacity
           style={styles.cartButton}
           activeOpacity={0.7}
-          onPress={() => navigation.navigate('Cart')}
+          onPress={() => navigation.popTo('Cart')}
           accessibilityRole="button"
           accessibilityHint="Abre o carrinho de compras."
         >
@@ -257,7 +258,7 @@ export default function ProductDetailsScreen({
                   activeOpacity={0.7}
                   disabled={
                     quantity >= product.stock ||
-                    quantity >= 99 ||
+                    quantity >= limits.cartQuantityMax ||
                     addingToCart
                   }
                   onPress={incrementQuantity}
@@ -266,7 +267,7 @@ export default function ProductDetailsScreen({
                   accessibilityState={{
                     disabled:
                       quantity >= product.stock ||
-                      quantity >= 99 ||
+                      quantity >= limits.cartQuantityMax ||
                       addingToCart,
                   }}
                 >
