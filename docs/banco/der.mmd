@@ -1,0 +1,126 @@
+erDiagram
+    users ||--o{ password_reset_tokens : "solicita"
+    users ||--o| carts : "possui"
+    users ||--o{ orders : "realiza"
+    users ||--o{ pets : "cadastra"
+    users ||--o{ appointments : "agenda"
+    carts ||--o{ cart_items : "contém"
+    products ||--o{ cart_items : "aparece em"
+    orders ||--o{ order_items : "contém"
+    orders ||--o{ payments : "é pago por"
+    products ||..o{ order_items : "origem (lógico, sem FK)"
+    pets ||--o{ appointments : "recebe"
+    services ||--o{ appointments : "é agendado em"
+
+    users {
+        uuid id PK
+        string name
+        string email UK
+        string phone "opcional"
+        string passwordHash
+        UserRole role "padrão CLIENTE"
+        datetime createdAt
+        datetime updatedAt
+    }
+    password_reset_tokens {
+        uuid id PK
+        string token UK
+        datetime expiresAt
+        datetime createdAt
+        uuid userId FK
+    }
+    products {
+        uuid id PK
+        string name
+        string description
+        int priceInCents
+        int stock
+        string imageUrl
+        ProductCategory category "padrão ACESSORIOS"
+        Species species "opcional"
+        boolean active "padrão true"
+        datetime createdAt
+        datetime updatedAt
+    }
+    carts {
+        uuid id PK
+        uuid userId FK,UK
+        datetime createdAt
+        datetime updatedAt
+    }
+    cart_items {
+        uuid id PK
+        uuid cartId FK
+        uuid productId FK
+        int quantity
+        datetime createdAt
+        datetime updatedAt
+    }
+    orders {
+        uuid id PK
+        uuid userId FK
+        OrderStatus status "padrão CONFIRMED"
+        int totalInCents
+        datetime createdAt
+        datetime updatedAt
+    }
+    order_items {
+        uuid id PK
+        uuid orderId FK
+        uuid productId "referência lógica"
+        string productName "snapshot"
+        string imageUrl "snapshot"
+        int unitPriceInCents "snapshot"
+        int quantity
+        int subtotalInCents
+    }
+    payments {
+        uuid id PK
+        uuid orderId FK
+        PaymentProvider provider
+        PaymentStatus status "padrão PENDING"
+        int amountInCents
+        string externalReference UK
+        string preferenceId UK "opcional"
+        string providerPaymentId UK "opcional"
+        string providerStatus "opcional"
+        datetime createdAt
+        datetime updatedAt
+    }
+    pets {
+        uuid id PK
+        uuid userId FK
+        string name
+        Species species
+        string breed "opcional"
+        PetSize size
+        datetime birthDate "opcional"
+        float weightKg "opcional"
+        string notes "opcional"
+        datetime createdAt
+        datetime updatedAt
+    }
+    services {
+        uuid id PK
+        string name
+        string description
+        int durationMinutes
+        int priceSmallInCents
+        int priceMediumInCents
+        int priceLargeInCents
+        boolean active "padrão true"
+        datetime createdAt
+        datetime updatedAt
+    }
+    appointments {
+        uuid id PK
+        uuid userId FK
+        uuid petId FK
+        uuid serviceId FK
+        datetime scheduledAt
+        int durationMinutes "snapshot"
+        int priceInCents "snapshot"
+        AppointmentStatus status "padrão SCHEDULED"
+        datetime createdAt
+        datetime updatedAt
+    }
