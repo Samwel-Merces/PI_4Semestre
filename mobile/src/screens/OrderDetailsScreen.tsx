@@ -56,8 +56,13 @@ export default function OrderDetailsScreen({
     loading,
     refreshing,
     errorMessage,
+    checkingPayment,
+    resumingPayment,
+    paymentMessage,
     loadOrder,
     refreshOrder,
+    checkPayment,
+    resumePayment,
   } = useOrderDetails({
     orderId,
   });
@@ -155,6 +160,46 @@ export default function OrderDetailsScreen({
 
         <OrderTimeline status={order.status} />
 
+        {order.status === 'PENDING_PAYMENT' && (
+          <View style={styles.paymentCard}>
+            <FeedbackMessage
+              kind="info"
+              message="Se você já pagou, a confirmação pode levar alguns instantes."
+            />
+
+            {paymentMessage ? (
+              <FeedbackMessage
+                kind="info"
+                message={paymentMessage}
+                style={styles.paymentMessage}
+              />
+            ) : null}
+
+            <AppButton
+              label="Pagar agora"
+              loading={resumingPayment}
+              loadingLabel="Abrindo o Mercado Pago..."
+              disabled={checkingPayment}
+              style={styles.paymentButton}
+              onPress={() => {
+                void resumePayment();
+              }}
+            />
+
+            <AppButton
+              variant="outline"
+              label="Verificar pagamento"
+              loading={checkingPayment}
+              loadingLabel="Verificando pagamento..."
+              disabled={resumingPayment}
+              style={styles.paymentButton}
+              onPress={() => {
+                void checkPayment();
+              }}
+            />
+          </View>
+        )}
+
         <Text style={styles.sectionTitle} accessibilityRole="header">
           Produtos
         </Text>
@@ -251,6 +296,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
+  },
+  paymentCard: {
+    marginTop: 16,
+    padding: 20,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  paymentMessage: {
+    marginTop: 8,
+  },
+  paymentButton: {
+    marginTop: 12,
   },
   orderCode: {
     color: '#1E293B',
