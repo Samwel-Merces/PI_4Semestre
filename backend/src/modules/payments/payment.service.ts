@@ -1,9 +1,3 @@
-import crypto from "crypto";
-
-import {
-  Preference,
-  Payment,
-} from "mercadopago";
 import {
   Prisma,
 } from "@prisma/client";
@@ -21,32 +15,19 @@ import {
 import {
   mercadoPagoClient,
 } from "./mercado-pago.client";
-
-const orderWithDetailsInclude = {
-  items: true,
-
-  user: {
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  },
-} satisfies Prisma.OrderInclude;
-
-type OrderWithDetails =
-  Prisma.OrderGetPayload<{
-    include: typeof orderWithDetailsInclude;
-  }>;
-
-interface PendingCheckout {
-  payment: {
-    id: string;
-    externalReference: string;
-  };
-
-  order: OrderWithDetails;
-}
+import {
+  MercadoPagoAdapter,
+} from "./mercado-pago.adapter";
+import type {
+  CheckoutResult,
+} from "../checkout/checkout.facade";
+import type {
+  PendingCheckout,
+} from "../checkout/checkout.types";
+import type {
+  GatewayPayment,
+  PaymentGateway,
+} from "./payment-gateway";
 
 // Prazo para pagar depois do checkout. Passado esse prazo, o Mercado Pago
 // recusa o pagamento e a rotina de expiração libera o estoque reservado.
@@ -70,18 +51,18 @@ type ProviderPaymentStatus =
 export class PaymentService {
   static #instance: PaymentService;
 
-  private readonly preferenceClient =
-    new Preference(mercadoPagoClient);
-
-  private readonly paymentClient =
-    new Payment(mercadoPagoClient);
-
-  private constructor() {}
+  private constructor(
+    private readonly gateway: PaymentGateway,
+  ) {}
 
   public static get instance(): PaymentService {
     if (!PaymentService.#instance) {
       PaymentService.#instance =
-        new PaymentService();
+        new PaymentService(
+          new MercadoPagoAdapter(
+            mercadoPagoClient,
+          ),
+        );
     }
 
     return PaymentService.#instance;
@@ -101,153 +82,6 @@ export class PaymentService {
     );
 
     return url.toString();
-  }
-
-  private async reserveCheckout(
-    userId: string,
-  ): Promise<PendingCheckout> {
-    return prisma.$transaction(
-      async (transaction) => {
-        const cart =
-          await transaction.cart.findUnique({
-            where: {
-              userId,
-            },
-
-            include: {
-              items: {
-                include: {
-                  product: true,
-                },
-
-                orderBy: {
-                  productId: "asc",
-                },
-              },
-            },
-          });
-
-        if (
-          !cart ||
-          cart.items.length === 0
-        ) {
-          throw new AppError(
-            "O carrinho está vazio.",
-            409,
-            "CART_EMPTY",
-          );
-        }
-
-        let totalInCents = 0;
-
-        for (const item of cart.items) {
-          if (!item.product.active) {
-            throw new AppError(
-              `O produto "${item.product.name}" está indisponível.`,
-              409,
-              "PRODUCT_UNAVAILABLE",
-              {
-                productId: item.product.id,
-              },
-            );
-          }
-
-          const stockReservation =
-            await transaction.product.updateMany({
-              where: {
-                id: item.productId,
-                active: true,
-
-                stock: {
-                  gte: item.quantity,
-                },
-              },
-
-              data: {
-                stock: {
-                  decrement: item.quantity,
-                },
-              },
-            });
-
-          if (stockReservation.count !== 1) {
-            throw new AppError(
-              `O estoque do produto "${item.product.name}" foi alterado. Atualize o carrinho e tente novamente.`,
-              409,
-              "INSUFFICIENT_STOCK",
-              {
-                productId: item.product.id,
-              },
-            );
-          }
-
-          totalInCents +=
-            item.quantity *
-            item.product.priceInCents;
-        }
-
-        const order =
-          await transaction.order.create({
-            data: {
-              userId,
-              status: "PENDING_PAYMENT",
-              totalInCents,
-
-              items: {
-                create: cart.items.map(
-                  (item) => ({
-                    productId: item.product.id,
-                    productName: item.product.name,
-                    imageUrl: item.product.imageUrl,
-                    unitPriceInCents:
-                      item.product.priceInCents,
-                    quantity: item.quantity,
-                    subtotalInCents:
-                      item.quantity *
-                      item.product.priceInCents,
-                  }),
-                ),
-              },
-            },
-
-            include: orderWithDetailsInclude,
-          });
-
-        const payment =
-          await transaction.payment.create({
-            data: {
-              orderId: order.id,
-              provider: "MERCADO_PAGO",
-              amountInCents: totalInCents,
-              externalReference:
-                `payment_${crypto.randomUUID()}`,
-            },
-
-            select: {
-              id: true,
-              externalReference: true,
-            },
-          });
-
-        await transaction.cartItem.deleteMany({
-          where: {
-            cartId: cart.id,
-          },
-        });
-
-        return {
-          payment,
-          order,
-        };
-      },
-      {
-        isolationLevel:
-          Prisma.TransactionIsolationLevel
-            .Serializable,
-        maxWait: 5000,
-        timeout: 10000,
-      },
-    );
   }
 
   // Cancela um pagamento que nunca chegou a ser feito. Se o pedido ainda
@@ -332,98 +166,44 @@ export class PaymentService {
     );
   }
 
-  async createCheckout(userId: string) {
-    const maximumAttempts = 3;
-    let checkout: PendingCheckout | null = null;
-
-    for (
-      let attempt = 1;
-      attempt <= maximumAttempts;
-      attempt += 1
-    ) {
-      try {
-        checkout = await this.reserveCheckout(userId);
-        break;
-      } catch (error) {
-        const isWriteConflict =
-          error instanceof
-            Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2034";
-
-        if (
-          !isWriteConflict ||
-          attempt === maximumAttempts
-        ) {
-          throw error;
-        }
-      }
-    }
-
-    if (!checkout) {
-      throw new AppError(
-        "Não foi possível iniciar o pagamento.",
-        500,
-        "PAYMENT_CHECKOUT_FAILED",
-      );
-    }
-
+  // Cria o pagamento no Mercado Pago para um pedido já reservado. Chamado
+  // pela fachada de checkout (CheckoutFacade). Se o Mercado Pago falhar, o
+  // pedido é cancelado e o estoque reservado volta.
+  async startPayment(
+    checkout: PendingCheckout,
+  ): Promise<CheckoutResult> {
     try {
       const preference =
-        await this.preferenceClient.create({
-          body: {
-            external_reference:
-              checkout.payment.externalReference,
+        await this.gateway.createCheckout({
+          externalReference:
+            checkout.payment.externalReference,
 
-            notification_url:
-              this.buildNotificationUrl(),
+          notificationUrl:
+            this.buildNotificationUrl(),
 
-            back_urls: {
-              success:
-                env.MERCADOPAGO_RETURN_URL,
-              pending:
-                env.MERCADOPAGO_RETURN_URL,
-              failure:
-                env.MERCADOPAGO_RETURN_URL,
-            },
+          returnUrl:
+            env.MERCADOPAGO_RETURN_URL,
 
-            auto_return: "approved",
+          payerName:
+            checkout.order.user.name,
 
-            expires: true,
-            expiration_date_from:
-              new Date().toISOString(),
-            expiration_date_to:
-              new Date(
-                Date.now() +
-                  CHECKOUT_EXPIRATION_MINUTES *
-                    60_000,
-              ).toISOString(),
+          items: checkout.order.items.map(
+            (item) => ({
+              id: item.productId,
+              title: item.productName,
+              imageUrl: item.imageUrl,
+              quantity: item.quantity,
+              unitPriceInCents:
+                item.unitPriceInCents,
+            }),
+          ),
 
-            // O e-mail do cliente não é enviado: com credenciais de teste,
-            // um e-mail que não é de usuário de teste faz o Mercado Pago
-            // recusar o pagamento ("uma das partes é de teste"). O cliente
-            // informa o e-mail na própria página do Mercado Pago.
-            payer: {
-              name: checkout.order.user.name,
-            },
-            items: checkout.order.items.map(
-              (item) => ({
-                id: item.productId,
-                title: item.productName,
-                picture_url: item.imageUrl,
-                quantity: item.quantity,
-                currency_id: "BRL",
-                unit_price:
-                  item.unitPriceInCents / 100,
-              }),
-            ),
-          },
+          expiresAt: new Date(
+            Date.now() +
+              CHECKOUT_EXPIRATION_MINUTES *
+                60_000,
+          ),
         });
-
-      if (!preference.id || !preference.init_point) {
-        throw new Error(
-          "Resposta incompleta do Mercado Pago.",
-        );
-      }
 
       await prisma.payment.update({
         where: {
@@ -439,7 +219,7 @@ export class PaymentService {
       return {
         paymentId: checkout.payment.id,
         orderId: checkout.order.id,
-        initPoint: preference.init_point,
+        initPoint: preference.paymentUrl,
       };
     } catch (error) {
       await this.cancelPendingPayment(
@@ -463,9 +243,9 @@ export class PaymentService {
     providerPaymentId: string,
   ): Promise<void> {
     const providerPayment =
-      await this.paymentClient.get({
-        id: providerPaymentId,
-      });
+      await this.gateway.getPayment(
+        providerPaymentId,
+      );
 
     await this.applyProviderPayment(
       providerPaymentId,
@@ -510,17 +290,10 @@ export class PaymentService {
     }
 
     for (const payment of order.payments) {
-      const search =
-        await this.paymentClient.search({
-          options: {
-            external_reference:
-              payment.externalReference,
-            sort: "date_last_updated",
-            criteria: "desc",
-          },
-        });
-
-      const results = search.results ?? [];
+      const results =
+        await this.gateway.findPaymentsByReference(
+          payment.externalReference,
+        );
 
       // Um aprovado vale mais que tentativas recusadas antes dele.
       const providerPayment =
@@ -531,7 +304,7 @@ export class PaymentService {
 
       if (providerPayment?.id) {
         await this.applyProviderPayment(
-          String(providerPayment.id),
+          providerPayment.id,
           providerPayment,
         );
       }
@@ -609,19 +382,13 @@ export class PaymentService {
     }
 
     try {
-      const preference =
-        await this.preferenceClient.get({
-          preferenceId: payment.preferenceId,
-        });
-
-      if (!preference.init_point) {
-        throw new Error(
-          "Preferência sem link de pagamento.",
+      const initPoint =
+        await this.gateway.getCheckoutUrl(
+          payment.preferenceId,
         );
-      }
 
       return {
-        initPoint: preference.init_point,
+        initPoint,
       };
     } catch {
       throw new AppError(
@@ -715,15 +482,11 @@ export class PaymentService {
 
   private async applyProviderPayment(
     providerPaymentId: string,
-    providerPayment: {
-      external_reference?: string;
-      transaction_amount?: number;
-      status?: string;
-    },
+    providerPayment: GatewayPayment,
   ): Promise<void> {
     if (
-      !providerPayment.external_reference ||
-      typeof providerPayment.transaction_amount !== "number" ||
+      !providerPayment.externalReference ||
+      typeof providerPayment.amount !== "number" ||
       !providerPayment.status
     ) {
       return;
@@ -788,7 +551,7 @@ export class PaymentService {
     }
 
     const amountInCents = Math.round(
-      providerPayment.transaction_amount * 100,
+      providerPayment.amount * 100,
     );
 
     await prisma.$transaction(
@@ -797,7 +560,7 @@ export class PaymentService {
           await transaction.payment.findUnique({
             where: {
               externalReference:
-                providerPayment.external_reference!,
+                providerPayment.externalReference!,
             },
 
             include: {
