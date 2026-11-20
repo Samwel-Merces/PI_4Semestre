@@ -4,6 +4,36 @@ Entradas mais recentes no topo.
 
 ---
 
+## 19/11/2026 — Padrões de projeto GoF e testes automatizados
+
+### O que mudou
+
+Os quatro padrões selecionados na análise do documento (seção 8) passaram do papel para o código. O comportamento da API não mudou.
+
+1. **State (pedidos).** `orders/state/` tem a interface `OrderState`, os estados concretos e o contexto `OrderContext`. `OrderService.updateStatus` deixou de ter a tabela de transições e passou a delegar ao estado atual. Ações não previstas dão 409 (`INVALID_ORDER_STATUS_TRANSITION`); cancelar devolve o estoque na mesma transação. O mapa `stateFor` é um `Record<OrderStatus, ...>`, então o compilador acusa um novo status sem classe de estado.
+2. **Adapter (pagamento e sessão).** No backend, `PaymentGateway` é a interface do PetShop e `MercadoPagoAdapter` a traduz para o SDK (preferência, consulta e busca de pagamentos). `PaymentService` não importa mais o SDK. No app, `TokenStorage` tem os adapters `SecureStoreAdapter` (Android/iOS) e `WebStorageAdapter` (navegador); `authStorage` mantém a mesma API.
+3. **Facade (checkout).** `CheckoutFacade` (`modules/checkout/`) coordena a reserva (carrinho, estoque, pedido, limpeza do carrinho, numa transação serializável, com nova tentativa em conflito P2034) e o início do pagamento. `StockService` ficou com a baixa de estoque. A rota `POST /payments/checkout` continua a mesma.
+4. **Builder (catálogo).** `ProductQueryBuilder` monta o `where`, a ordenação e a paginação; `catalogQueries` (diretor) define as consultas do cliente (só ativos) e do administrador. `ProductService` não duplica mais o filtro.
+
+### Diferenças em relação aos esboços do Apêndice A do documento
+
+- O pedido tem o estado `PENDING_PAYMENT`, que não existia quando o documento foi escrito. Ele não aceita ações do administrador: só o pagamento o move.
+- O pagamento usa o Checkout Pro (preferência e redirecionamento), não cobrança direta com token de cartão. Por isso `PaymentGateway` tem `createCheckout`, `getCheckoutUrl`, `getPayment` e `findPaymentsByReference`, e não `charge`.
+- O cancelamento por administrador não usa `requireRole`: a rota `/orders/admin/...` já exige o perfil ADMIN.
+- Pagamento recusado não é tratado dentro da fachada, porque no Checkout Pro o resultado só chega depois, pelo webhook ou pela verificação. A falha ao criar o link do Mercado Pago é tratada em `PaymentService.startPayment`, que cancela o pedido e devolve o estoque.
+
+### Testes
+
+`npm test` (backend) roda 33 testes com o executor nativo do Node, sem banco e sem Mercado Pago: matriz de transições do State, estoque devolvido uma única vez, Builder e diretor, tradução do Adapter e nova tentativa da Facade.
+
+Verificado também com a API e o Postgres reais: checkout gerando o link do Mercado Pago; pedido pendente rejeitando ações (409); CONFIRMED → PROCESSING → CANCELLED devolvendo o estoque (42 → 44); cancelar de novo (409); perfil comum no endpoint de administrador (403); catálogo com busca e filtros.
+
+### Limpeza
+
+Removidos do repositório `backend/.agents`, `backend/.windsurf` e `backend/skills-lock.json` (arquivos de ferramentas de IA, sem uso no projeto).
+
+---
+
 ## 31/10/2026 — Verificação, retomada e expiração de pagamentos
 
 ### O que mudou

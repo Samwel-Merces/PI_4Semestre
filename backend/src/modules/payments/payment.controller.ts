@@ -15,6 +15,9 @@ import {
 } from "../../shared/errors/AppError";
 
 import {
+  checkoutFacade,
+} from "../checkout/checkout.facade";
+import {
   orderService,
 } from "../orders/order.service";
 
@@ -79,7 +82,7 @@ export class PaymentController {
     res: Response,
   ) {
     const checkout =
-      await paymentService.createCheckout(
+      await checkoutFacade.checkout(
         req.user!.userId,
       );
 

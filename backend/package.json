@@ -14,7 +14,8 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:status": "prisma migrate status",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "test": "node --require ts-node/register/transpile-only --require ./src/test/setup-env.ts --test --test-reporter=spec \"src/**/*.test.ts\""
   },
   "prisma": {
     "seed": "ts-node-dev --transpile-only prisma/seed.ts"

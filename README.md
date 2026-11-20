@@ -50,6 +50,9 @@ npm run db:seed
 
 # 6. API em http://localhost:3000
 npm run dev
+
+# Testes automatizados (não usam banco nem Mercado Pago)
+npm test
 ```
 
 ### Mobile
@@ -153,7 +156,8 @@ O script verifica toques sem papel, campos sem rótulo, imagens sem rótulo e es
 backend/
   prisma/               schema e migrations
   src/
-    modules/            auth, products, cart, orders, payments, pets, services, appointments
+    modules/            auth, products, cart, orders, payments, checkout, pets, services, appointments
+                        (orders/state: State; payments: Adapter; checkout: Facade; products: Builder)
     middlewares/        autenticação, admin, validação e erros
     config/ database/ shared/
 mobile/
