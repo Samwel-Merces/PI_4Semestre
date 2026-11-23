@@ -107,6 +107,13 @@ export class PaymentController {
               req.headers["x-request-id"],
             ),
             hasDataId: Boolean(dataId),
+            type:
+              req.body?.type ??
+              req.query.type ??
+              req.query.topic,
+            action: req.body?.action,
+            reason: error.reason,
+            queryKeys: Object.keys(req.query),
           },
         );
 
