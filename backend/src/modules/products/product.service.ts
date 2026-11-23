@@ -3,6 +3,7 @@ import { Prisma, Product } from "@prisma/client";
 import { prisma } from "../../database/prisma";
 import { AppError } from "../../shared/errors/AppError";
 
+import { catalogQueries } from "./catalog-queries";
 import {
   CreateProductInput,
   ProductListQuery,
@@ -51,51 +52,6 @@ export class ProductService {
     };
   }
 
-  private createFilter(
-    query: ProductListQuery,
-  ): Prisma.ProductWhereInput {
-    const { search, category, species, maxStock } = query;
-
-    const conditions: Prisma.ProductWhereInput[] = [];
-
-    if (search) {
-      conditions.push({
-        OR: [
-          {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-          {
-            description: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-        ],
-      });
-    }
-
-    if (category) {
-      conditions.push({ category });
-    }
-
-    if (species) {
-      conditions.push({
-        OR: [{ species }, { species: null }],
-      });
-    }
-
-    if (maxStock !== undefined) {
-      conditions.push({
-        stock: { lte: maxStock },
-      });
-    }
-
-    return { AND: conditions };
-  }
-
   async create(
     data: CreateProductInput,
   ): Promise<ProductResponse> {
@@ -124,28 +80,15 @@ export class ProductService {
       pageSize,
     } = query;
 
-    const where: Prisma.ProductWhereInput = {
-      active: true,
-      ...this.createFilter(query),
-    };
-
-    const skip = (page - 1) * pageSize;
+    const args =
+      catalogQueries.client(query);
 
     const [products, totalItems] =
       await prisma.$transaction([
-        prisma.product.findMany({
-          where,
-
-          orderBy: {
-            createdAt: "desc",
-          },
-
-          skip,
-          take: pageSize,
-        }),
+        prisma.product.findMany(args),
 
         prisma.product.count({
-          where,
+          where: args.where,
         }),
       ]);
 
@@ -173,31 +116,17 @@ export class ProductService {
     const {
       page,
       pageSize,
-      active,
     } = query;
 
-    const where: Prisma.ProductWhereInput = {
-      ...this.createFilter(query),
-      ...(active === undefined ? {} : { active }),
-    };
-
-    const skip = (page - 1) * pageSize;
+    const args =
+      catalogQueries.admin(query);
 
     const [products, totalItems] =
       await prisma.$transaction([
-        prisma.product.findMany({
-          where,
-
-          orderBy: {
-            createdAt: "desc",
-          },
-
-          skip,
-          take: pageSize,
-        }),
+        prisma.product.findMany(args),
 
         prisma.product.count({
-          where,
+          where: args.where,
         }),
       ]);
 

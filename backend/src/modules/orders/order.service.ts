@@ -6,6 +6,9 @@ import {
 import { prisma } from "../../database/prisma";
 import { AppError } from "../../shared/errors/AppError";
 
+import { OrderContext } from "./state/order-context";
+import type { OrderAction } from "./state/order-state";
+
 import {
   OrderListQuery,
   UpdateOrderStatusInput,
@@ -38,6 +41,16 @@ interface PaginatedOrders {
     totalPages: number;
   };
 }
+
+// Ação do padrão State que corresponde a cada status pedido pelo
+// administrador. CONFIRMED não tem ação: só o pagamento confirma um pedido.
+const statusActions: Partial<
+  Record<OrderStatus, OrderAction>
+> = {
+  PROCESSING: "process",
+  COMPLETED: "complete",
+  CANCELLED: "cancel",
+};
 
 export class OrderService {
   static #instance: OrderService;
@@ -204,34 +217,6 @@ export class OrderService {
     return order;
   }
 
-  private getAllowedStatuses(
-    currentStatus: OrderStatus,
-  ): OrderStatus[] {
-    const transitions:
-      Record<
-        OrderStatus,
-        OrderStatus[]
-      > = {
-        PENDING_PAYMENT: [],
-
-        CONFIRMED: [
-          "PROCESSING",
-          "CANCELLED",
-        ],
-
-        PROCESSING: [
-          "COMPLETED",
-          "CANCELLED",
-        ],
-
-        COMPLETED: [],
-
-        CANCELLED: [],
-      };
-
-    return transitions[currentStatus];
-  }
-
   async updateStatus(
     orderId: string,
     data: UpdateOrderStatusInput,
@@ -272,16 +257,10 @@ export class OrderService {
           });
         }
 
-        const allowedStatuses =
-          this.getAllowedStatuses(
-            order.status,
-          );
+        const action =
+          statusActions[newStatus];
 
-        if (
-          !allowedStatuses.includes(
-            newStatus,
-          )
-        ) {
+        if (!action) {
           throw new AppError(
             `Não é permitido alterar o pedido de ${order.status} para ${newStatus}.`,
             409,
@@ -292,38 +271,46 @@ export class OrderService {
 
               requestedStatus:
                 newStatus,
-
-              allowedStatuses,
             },
           );
         }
 
-        if (
-          newStatus === "CANCELLED"
-        ) {
-          for (const item of order.items) {
-            await transaction.product.updateMany({
-              where: {
-                id: item.productId,
-              },
+        // Padrão State: o estado atual do pedido decide se a ação é aceita
+        // e aplica a transição (devolvendo o estoque ao cancelar).
+        const context = new OrderContext(
+          {
+            updateOrderStatus: async (
+              id,
+              status,
+            ) => {
+              await transaction.order.update({
+                where: { id },
+                data: { status },
+              });
+            },
 
-              data: {
-                stock: {
-                  increment:
-                    item.quantity,
+            incrementProductStock: async (
+              productId,
+              quantity,
+            ) => {
+              await transaction.product.updateMany({
+                where: { id: productId },
+                data: {
+                  stock: {
+                    increment: quantity,
+                  },
                 },
-              },
-            });
-          }
-        }
+              });
+            },
+          },
+          order,
+        );
 
-        return transaction.order.update({
+        await context.perform(action);
+
+        return transaction.order.findUniqueOrThrow({
           where: {
             id: order.id,
-          },
-
-          data: {
-            status: newStatus,
           },
 
           include: orderInclude,

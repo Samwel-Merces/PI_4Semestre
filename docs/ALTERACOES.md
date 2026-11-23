@@ -4,6 +4,84 @@ Entradas mais recentes no topo.
 
 ---
 
+## 19/11/2026 — Padrões de projeto GoF e testes automatizados
+
+### O que mudou
+
+Os quatro padrões selecionados na análise do documento (seção 8) passaram do papel para o código. O comportamento da API não mudou.
+
+1. **State (pedidos).** `orders/state/` tem a interface `OrderState`, os estados concretos e o contexto `OrderContext`. `OrderService.updateStatus` deixou de ter a tabela de transições e passou a delegar ao estado atual. Ações não previstas dão 409 (`INVALID_ORDER_STATUS_TRANSITION`); cancelar devolve o estoque na mesma transação. O mapa `stateFor` é um `Record<OrderStatus, ...>`, então o compilador acusa um novo status sem classe de estado.
+2. **Adapter (pagamento e sessão).** No backend, `PaymentGateway` é a interface do PetShop e `MercadoPagoAdapter` a traduz para o SDK (preferência, consulta e busca de pagamentos). `PaymentService` não importa mais o SDK. No app, `TokenStorage` tem os adapters `SecureStoreAdapter` (Android/iOS) e `WebStorageAdapter` (navegador); `authStorage` mantém a mesma API.
+3. **Facade (checkout).** `CheckoutFacade` (`modules/checkout/`) coordena a reserva (carrinho, estoque, pedido, limpeza do carrinho, numa transação serializável, com nova tentativa em conflito P2034) e o início do pagamento. `StockService` ficou com a baixa de estoque. A rota `POST /payments/checkout` continua a mesma.
+4. **Builder (catálogo).** `ProductQueryBuilder` monta o `where`, a ordenação e a paginação; `catalogQueries` (diretor) define as consultas do cliente (só ativos) e do administrador. `ProductService` não duplica mais o filtro.
+
+### Diferenças em relação aos esboços do Apêndice A do documento
+
+- O pedido tem o estado `PENDING_PAYMENT`, que não existia quando o documento foi escrito. Ele não aceita ações do administrador: só o pagamento o move.
+- O pagamento usa o Checkout Pro (preferência e redirecionamento), não cobrança direta com token de cartão. Por isso `PaymentGateway` tem `createCheckout`, `getCheckoutUrl`, `getPayment` e `findPaymentsByReference`, e não `charge`.
+- O cancelamento por administrador não usa `requireRole`: a rota `/orders/admin/...` já exige o perfil ADMIN.
+- Pagamento recusado não é tratado dentro da fachada, porque no Checkout Pro o resultado só chega depois, pelo webhook ou pela verificação. A falha ao criar o link do Mercado Pago é tratada em `PaymentService.startPayment`, que cancela o pedido e devolve o estoque.
+
+### Testes
+
+`npm test` (backend) roda 33 testes com o executor nativo do Node, sem banco e sem Mercado Pago: matriz de transições do State, estoque devolvido uma única vez, Builder e diretor, tradução do Adapter e nova tentativa da Facade.
+
+Verificado também com a API e o Postgres reais: checkout gerando o link do Mercado Pago; pedido pendente rejeitando ações (409); CONFIRMED → PROCESSING → CANCELLED devolvendo o estoque (42 → 44); cancelar de novo (409); perfil comum no endpoint de administrador (403); catálogo com busca e filtros.
+
+### Limpeza
+
+Removidos do repositório `backend/.agents`, `backend/.windsurf` e `backend/skills-lock.json` (arquivos de ferramentas de IA, sem uso no projeto).
+
+---
+
+## 31/10/2026 — Verificação, retomada e expiração de pagamentos
+
+### O que mudou
+
+1. **Verificação do pagamento sem depender do webhook.**
+   - Nova rota `POST /payments/orders/:orderId/sync` (cliente logado, só os próprios pedidos). Busca no Mercado Pago os pagamentos pendentes do pedido pela referência externa e aplica as mesmas regras do webhook.
+   - A lógica do webhook foi separada no método `applyProviderPayment`, usado pelo webhook e pela verificação.
+   - No app, ao abrir um pedido "Aguardando pagamento", a verificação roda sozinha. A tela também mostra um aviso e o botão **"Verificar pagamento"**.
+2. **Retomar o pagamento.**
+   - Nova rota `POST /payments/orders/:orderId/resume`. Confere o pagamento antes, para não cobrar de novo um pedido que já foi pago, e devolve o link do Mercado Pago do pedido.
+   - Recusa com 409 se o pedido não está aguardando pagamento ou se o prazo passou.
+   - No app, botão **"Pagar agora"** no pedido pendente. Ao voltar do Mercado Pago, o pedido é recarregado e verificado.
+3. **Expiração de pedidos abandonados.**
+   - O link de pagamento expira em 30 minutos (`expires` e `expiration_date_to` na preferência).
+   - Uma rotina roda ao ligar a API e a cada 5 minutos (`server.ts`). Para pedidos "Aguardando pagamento" com mais de 35 minutos, ela confere no Mercado Pago e, se não houver nenhuma tentativa de pagamento, cancela o pedido e devolve o estoque. O pagamento fica com `providerStatus` igual a `expired`.
+   - Pedidos com pagamento em andamento no Mercado Pago (ex.: boleto em aberto) não são cancelados. O webhook resolve.
+   - O cancelamento usa o mesmo método do checkout que falha ao criar a preferência (`cancelPendingPayment`). O estoque só volta se o pedido ainda estava aguardando pagamento.
+4. **App:** a abertura da página do Mercado Pago foi para `utils/openPaymentPage.ts`, usada pelo checkout e pelo detalhe do pedido.
+
+### Arquivos
+
+| Arquivo | Alteração |
+| --- | --- |
+| `backend/src/modules/payments/payment.service.ts` | `synchronizeOrderPayment`, `resumeOrderPayment`, `expireAbandonedCheckouts`, `applyProviderPayment`, `cancelPendingPayment`; expiração na preferência |
+| `backend/src/modules/payments/payment.controller.ts` | Ações `syncOrderPayment` e `resumeOrderPayment` |
+| `backend/src/modules/payments/payment.routes.ts` | Rotas `/orders/:orderId/sync` e `/orders/:orderId/resume` |
+| `backend/src/server.ts` | Rotina de expiração a cada 5 minutos, parada no encerramento |
+| `mobile/src/utils/openPaymentPage.ts` | **Novo** — abre o Mercado Pago (web ou celular) |
+| `mobile/src/services/payment.service.ts` | `syncOrderPayment` e `resumeOrderPayment` |
+| `mobile/src/hooks/useCheckout.ts` | Usa `openPaymentPage` |
+| `mobile/src/hooks/useOrderDetails.ts` | Verificação automática, `checkPayment` e `resumePayment` |
+| `mobile/src/screens/OrderDetailsScreen.tsx` | Cartão de pagamento pendente com "Pagar agora" e "Verificar pagamento" |
+
+### Como foi testado
+
+- **Webhook perdido:** um pedido pago foi voltado no banco para "Aguardando pagamento". A verificação (pela rota e ao abrir o pedido no app) o devolveu para Confirmado/Aprovado.
+- **Rota de verificação:** pedido sem pagamento continua pendente (200); pedido confirmado não muda (200); pedido de outro usuário dá 404; ID inválido dá 400; sem login dá 401.
+- **Retomar:** pedido pendente devolve o link (200); pedido pago dá 409; pedido criado com outro token do Mercado Pago dá 502 com mensagem clara. No app, "Pagar agora" abriu o Mercado Pago, o pagamento foi feito com o comprador de teste e o pedido voltou como Confirmado.
+- **Expiração:** na primeira execução, a rotina cancelou os 4 pedidos abandonados e devolveu o estoque; os pedidos pagos não mudaram. Um checkout novo com prazo de validade foi aceito pelo Mercado Pago.
+- `npx tsc --noEmit` sem erros no backend e no mobile; `npm run audit:a11y` sem problemas.
+
+### Pendências
+
+- Na versão web, o retorno do Mercado Pago (`petshop://payment-return`) não abre o app. O cliente precisa fechar a aba do Mercado Pago e voltar para a aba do app.
+- Se o webhook de um pagamento aprovado chegar depois que a rotina cancelou o pedido, o pagamento fica Aprovado e o pedido continua Cancelado. A expiração do link (30 minutos) e a folga de 5 minutos tornam isso improvável, mas o caso não é tratado.
+
+---
+
 ## 31/10/2026 — Correções no pagamento pelo Mercado Pago
 
 ### O que mudou

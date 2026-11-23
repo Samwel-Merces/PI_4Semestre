@@ -15,6 +15,13 @@ import {
 } from "../../shared/errors/AppError";
 
 import {
+  checkoutFacade,
+} from "../checkout/checkout.facade";
+import {
+  orderService,
+} from "../orders/order.service";
+
+import {
   paymentService,
 } from "./payment.service";
 
@@ -75,11 +82,45 @@ export class PaymentController {
     res: Response,
   ) {
     const checkout =
-      await paymentService.createCheckout(
+      await checkoutFacade.checkout(
         req.user!.userId,
       );
 
     return res.status(201).json(checkout);
+  }
+
+  async syncOrderPayment(
+    req: Request,
+    res: Response,
+  ) {
+    const orderId =
+      req.params.orderId as string;
+
+    await paymentService.synchronizeOrderPayment(
+      req.user!.userId,
+      orderId,
+    );
+
+    const order =
+      await orderService.findForUser(
+        req.user!.userId,
+        orderId,
+      );
+
+    return res.status(200).json(order);
+  }
+
+  async resumeOrderPayment(
+    req: Request,
+    res: Response,
+  ) {
+    const result =
+      await paymentService.resumeOrderPayment(
+        req.user!.userId,
+        req.params.orderId as string,
+      );
+
+    return res.status(200).json(result);
   }
 
   async receiveWebhook(

@@ -1,9 +1,3 @@
-import crypto from "crypto";
-
-import {
-  Preference,
-  Payment,
-} from "mercadopago";
 import {
   Prisma,
 } from "@prisma/client";
@@ -21,32 +15,27 @@ import {
 import {
   mercadoPagoClient,
 } from "./mercado-pago.client";
+import {
+  MercadoPagoAdapter,
+} from "./mercado-pago.adapter";
+import type {
+  CheckoutResult,
+} from "../checkout/checkout.facade";
+import type {
+  PendingCheckout,
+} from "../checkout/checkout.types";
+import type {
+  GatewayPayment,
+  PaymentGateway,
+} from "./payment-gateway";
 
-const orderWithDetailsInclude = {
-  items: true,
+// Prazo para pagar depois do checkout. Passado esse prazo, o Mercado Pago
+// recusa o pagamento e a rotina de expiração libera o estoque reservado.
+export const CHECKOUT_EXPIRATION_MINUTES = 30;
 
-  user: {
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  },
-} satisfies Prisma.OrderInclude;
-
-type OrderWithDetails =
-  Prisma.OrderGetPayload<{
-    include: typeof orderWithDetailsInclude;
-  }>;
-
-interface PendingCheckout {
-  payment: {
-    id: string;
-    externalReference: string;
-  };
-
-  order: OrderWithDetails;
-}
+// Folga antes de cancelar, para não atropelar um pagamento feito no limite
+// do prazo cujo webhook ainda está a caminho.
+const ABANDONED_CHECKOUT_GRACE_MINUTES = 5;
 
 type ProviderPaymentStatus =
   | "approved"
@@ -62,18 +51,18 @@ type ProviderPaymentStatus =
 export class PaymentService {
   static #instance: PaymentService;
 
-  private readonly preferenceClient =
-    new Preference(mercadoPagoClient);
-
-  private readonly paymentClient =
-    new Payment(mercadoPagoClient);
-
-  private constructor() {}
+  private constructor(
+    private readonly gateway: PaymentGateway,
+  ) {}
 
   public static get instance(): PaymentService {
     if (!PaymentService.#instance) {
       PaymentService.#instance =
-        new PaymentService();
+        new PaymentService(
+          new MercadoPagoAdapter(
+            mercadoPagoClient,
+          ),
+        );
     }
 
     return PaymentService.#instance;
@@ -95,155 +84,11 @@ export class PaymentService {
     return url.toString();
   }
 
-  private async reserveCheckout(
-    userId: string,
-  ): Promise<PendingCheckout> {
-    return prisma.$transaction(
-      async (transaction) => {
-        const cart =
-          await transaction.cart.findUnique({
-            where: {
-              userId,
-            },
-
-            include: {
-              items: {
-                include: {
-                  product: true,
-                },
-
-                orderBy: {
-                  productId: "asc",
-                },
-              },
-            },
-          });
-
-        if (
-          !cart ||
-          cart.items.length === 0
-        ) {
-          throw new AppError(
-            "O carrinho está vazio.",
-            409,
-            "CART_EMPTY",
-          );
-        }
-
-        let totalInCents = 0;
-
-        for (const item of cart.items) {
-          if (!item.product.active) {
-            throw new AppError(
-              `O produto "${item.product.name}" está indisponível.`,
-              409,
-              "PRODUCT_UNAVAILABLE",
-              {
-                productId: item.product.id,
-              },
-            );
-          }
-
-          const stockReservation =
-            await transaction.product.updateMany({
-              where: {
-                id: item.productId,
-                active: true,
-
-                stock: {
-                  gte: item.quantity,
-                },
-              },
-
-              data: {
-                stock: {
-                  decrement: item.quantity,
-                },
-              },
-            });
-
-          if (stockReservation.count !== 1) {
-            throw new AppError(
-              `O estoque do produto "${item.product.name}" foi alterado. Atualize o carrinho e tente novamente.`,
-              409,
-              "INSUFFICIENT_STOCK",
-              {
-                productId: item.product.id,
-              },
-            );
-          }
-
-          totalInCents +=
-            item.quantity *
-            item.product.priceInCents;
-        }
-
-        const order =
-          await transaction.order.create({
-            data: {
-              userId,
-              status: "PENDING_PAYMENT",
-              totalInCents,
-
-              items: {
-                create: cart.items.map(
-                  (item) => ({
-                    productId: item.product.id,
-                    productName: item.product.name,
-                    imageUrl: item.product.imageUrl,
-                    unitPriceInCents:
-                      item.product.priceInCents,
-                    quantity: item.quantity,
-                    subtotalInCents:
-                      item.quantity *
-                      item.product.priceInCents,
-                  }),
-                ),
-              },
-            },
-
-            include: orderWithDetailsInclude,
-          });
-
-        const payment =
-          await transaction.payment.create({
-            data: {
-              orderId: order.id,
-              provider: "MERCADO_PAGO",
-              amountInCents: totalInCents,
-              externalReference:
-                `payment_${crypto.randomUUID()}`,
-            },
-
-            select: {
-              id: true,
-              externalReference: true,
-            },
-          });
-
-        await transaction.cartItem.deleteMany({
-          where: {
-            cartId: cart.id,
-          },
-        });
-
-        return {
-          payment,
-          order,
-        };
-      },
-      {
-        isolationLevel:
-          Prisma.TransactionIsolationLevel
-            .Serializable,
-        maxWait: 5000,
-        timeout: 10000,
-      },
-    );
-  }
-
-  private async cancelReservedCheckout(
+  // Cancela um pagamento que nunca chegou a ser feito. Se o pedido ainda
+  // aguarda pagamento, ele é cancelado e o estoque reservado volta.
+  private async cancelPendingPayment(
     paymentId: string,
+    providerStatus: string,
   ): Promise<void> {
     await prisma.$transaction(
       async (transaction) => {
@@ -269,6 +114,24 @@ export class PaymentService {
           return;
         }
 
+        await transaction.payment.update({
+          where: {
+            id: payment.id,
+          },
+
+          data: {
+            status: "CANCELLED",
+            providerStatus,
+          },
+        });
+
+        if (
+          payment.order.status !==
+          "PENDING_PAYMENT"
+        ) {
+          return;
+        }
+
         for (const item of payment.order.items) {
           await transaction.product.update({
             where: {
@@ -282,18 +145,6 @@ export class PaymentService {
             },
           });
         }
-
-        await transaction.payment.update({
-          where: {
-            id: payment.id,
-          },
-
-          data: {
-            status: "CANCELLED",
-            providerStatus:
-              "preference_creation_failed",
-          },
-        });
 
         await transaction.order.update({
           where: {
@@ -315,88 +166,44 @@ export class PaymentService {
     );
   }
 
-  async createCheckout(userId: string) {
-    const maximumAttempts = 3;
-    let checkout: PendingCheckout | null = null;
-
-    for (
-      let attempt = 1;
-      attempt <= maximumAttempts;
-      attempt += 1
-    ) {
-      try {
-        checkout = await this.reserveCheckout(userId);
-        break;
-      } catch (error) {
-        const isWriteConflict =
-          error instanceof
-            Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2034";
-
-        if (
-          !isWriteConflict ||
-          attempt === maximumAttempts
-        ) {
-          throw error;
-        }
-      }
-    }
-
-    if (!checkout) {
-      throw new AppError(
-        "Não foi possível iniciar o pagamento.",
-        500,
-        "PAYMENT_CHECKOUT_FAILED",
-      );
-    }
-
+  // Cria o pagamento no Mercado Pago para um pedido já reservado. Chamado
+  // pela fachada de checkout (CheckoutFacade). Se o Mercado Pago falhar, o
+  // pedido é cancelado e o estoque reservado volta.
+  async startPayment(
+    checkout: PendingCheckout,
+  ): Promise<CheckoutResult> {
     try {
       const preference =
-        await this.preferenceClient.create({
-          body: {
-            external_reference:
-              checkout.payment.externalReference,
+        await this.gateway.createCheckout({
+          externalReference:
+            checkout.payment.externalReference,
 
-            notification_url:
-              this.buildNotificationUrl(),
+          notificationUrl:
+            this.buildNotificationUrl(),
 
-            back_urls: {
-              success:
-                env.MERCADOPAGO_RETURN_URL,
-              pending:
-                env.MERCADOPAGO_RETURN_URL,
-              failure:
-                env.MERCADOPAGO_RETURN_URL,
-            },
+          returnUrl:
+            env.MERCADOPAGO_RETURN_URL,
 
-            auto_return: "approved",
+          payerName:
+            checkout.order.user.name,
 
-            // O e-mail do cliente não é enviado: com credenciais de teste,
-            // um e-mail que não é de usuário de teste faz o Mercado Pago
-            // recusar o pagamento ("uma das partes é de teste"). O cliente
-            // informa o e-mail na própria página do Mercado Pago.
-            payer: {
-              name: checkout.order.user.name,
-            },
-            items: checkout.order.items.map(
-              (item) => ({
-                id: item.productId,
-                title: item.productName,
-                picture_url: item.imageUrl,
-                quantity: item.quantity,
-                currency_id: "BRL",
-                unit_price:
-                  item.unitPriceInCents / 100,
-              }),
-            ),
-          },
+          items: checkout.order.items.map(
+            (item) => ({
+              id: item.productId,
+              title: item.productName,
+              imageUrl: item.imageUrl,
+              quantity: item.quantity,
+              unitPriceInCents:
+                item.unitPriceInCents,
+            }),
+          ),
+
+          expiresAt: new Date(
+            Date.now() +
+              CHECKOUT_EXPIRATION_MINUTES *
+                60_000,
+          ),
         });
-
-      if (!preference.id || !preference.init_point) {
-        throw new Error(
-          "Resposta incompleta do Mercado Pago.",
-        );
-      }
 
       await prisma.payment.update({
         where: {
@@ -412,11 +219,12 @@ export class PaymentService {
       return {
         paymentId: checkout.payment.id,
         orderId: checkout.order.id,
-        initPoint: preference.init_point,
+        initPoint: preference.paymentUrl,
       };
     } catch (error) {
-      await this.cancelReservedCheckout(
+      await this.cancelPendingPayment(
         checkout.payment.id,
+        "preference_creation_failed",
       );
 
       if (error instanceof AppError) {
@@ -435,13 +243,250 @@ export class PaymentService {
     providerPaymentId: string,
   ): Promise<void> {
     const providerPayment =
-      await this.paymentClient.get({
-        id: providerPaymentId,
+      await this.gateway.getPayment(
+        providerPaymentId,
+      );
+
+    await this.applyProviderPayment(
+      providerPaymentId,
+      providerPayment,
+    );
+  }
+
+  // Plano B do webhook: quando o cliente volta do Mercado Pago, o app pede
+  // para conferir o pagamento. Os pagamentos ainda pendentes do pedido são
+  // buscados no Mercado Pago pela referência externa e atualizados com as
+  // mesmas regras do webhook.
+  async synchronizeOrderPayment(
+    userId: string,
+    orderId: string,
+  ): Promise<void> {
+    const order =
+      await prisma.order.findFirst({
+        where: {
+          id: orderId,
+          userId,
+        },
+
+        include: {
+          payments: {
+            where: {
+              status: "PENDING",
+            },
+          },
+        },
       });
 
+    if (!order) {
+      throw new AppError(
+        "Pedido não encontrado.",
+        404,
+        "ORDER_NOT_FOUND",
+      );
+    }
+
+    if (order.status !== "PENDING_PAYMENT") {
+      return;
+    }
+
+    for (const payment of order.payments) {
+      const results =
+        await this.gateway.findPaymentsByReference(
+          payment.externalReference,
+        );
+
+      // Um aprovado vale mais que tentativas recusadas antes dele.
+      const providerPayment =
+        results.find(
+          (result) =>
+            result.status === "approved",
+        ) ?? results[0];
+
+      if (providerPayment?.id) {
+        await this.applyProviderPayment(
+          providerPayment.id,
+          providerPayment,
+        );
+      }
+    }
+  }
+
+  // Devolve o link do Mercado Pago de um pedido que ainda não foi pago.
+  // Confere o pagamento antes, para não mandar pagar de novo um pedido
+  // cujo webhook só não chegou.
+  async resumeOrderPayment(
+    userId: string,
+    orderId: string,
+  ): Promise<{ initPoint: string }> {
+    await this.synchronizeOrderPayment(
+      userId,
+      orderId,
+    );
+
+    const order =
+      await prisma.order.findFirst({
+        where: {
+          id: orderId,
+          userId,
+        },
+
+        include: {
+          payments: {
+            where: {
+              status: "PENDING",
+              preferenceId: {
+                not: null,
+              },
+            },
+
+            orderBy: {
+              createdAt: "desc",
+            },
+
+            take: 1,
+          },
+        },
+      });
+
+    if (!order) {
+      throw new AppError(
+        "Pedido não encontrado.",
+        404,
+        "ORDER_NOT_FOUND",
+      );
+    }
+
+    const payment = order.payments[0];
+
     if (
-      !providerPayment.external_reference ||
-      typeof providerPayment.transaction_amount !== "number" ||
+      order.status !== "PENDING_PAYMENT" ||
+      !payment?.preferenceId
+    ) {
+      throw new AppError(
+        "Este pedido não está aguardando pagamento.",
+        409,
+        "ORDER_NOT_AWAITING_PAYMENT",
+      );
+    }
+
+    const expiresAt =
+      payment.createdAt.getTime() +
+      CHECKOUT_EXPIRATION_MINUTES * 60_000;
+
+    if (Date.now() > expiresAt) {
+      throw new AppError(
+        "O prazo para pagamento deste pedido expirou. Faça um novo pedido.",
+        409,
+        "CHECKOUT_EXPIRED",
+      );
+    }
+
+    try {
+      const initPoint =
+        await this.gateway.getCheckoutUrl(
+          payment.preferenceId,
+        );
+
+      return {
+        initPoint,
+      };
+    } catch {
+      throw new AppError(
+        "Não foi possível retomar o pagamento deste pedido.",
+        502,
+        "MERCADO_PAGO_PREFERENCE_UNAVAILABLE",
+      );
+    }
+  }
+
+  // Cancela os pedidos cujo prazo de pagamento passou sem nenhuma tentativa
+  // registrada no Mercado Pago, devolvendo o estoque. Pedidos com pagamento
+  // em andamento (ex.: boleto em aberto) ficam para o webhook resolver.
+  // Devolve quantos pedidos foram cancelados.
+  async expireAbandonedCheckouts(): Promise<number> {
+    const cutoff = new Date(
+      Date.now() -
+        (CHECKOUT_EXPIRATION_MINUTES +
+          ABANDONED_CHECKOUT_GRACE_MINUTES) *
+          60_000,
+    );
+
+    const orders =
+      await prisma.order.findMany({
+        where: {
+          status: "PENDING_PAYMENT",
+          createdAt: {
+            lt: cutoff,
+          },
+        },
+
+        select: {
+          id: true,
+          userId: true,
+        },
+      });
+
+    let expiredOrders = 0;
+
+    for (const order of orders) {
+      try {
+        await this.synchronizeOrderPayment(
+          order.userId,
+          order.id,
+        );
+
+        const pendingPayments =
+          await prisma.payment.findMany({
+            where: {
+              orderId: order.id,
+              status: "PENDING",
+            },
+
+            select: {
+              id: true,
+              providerPaymentId: true,
+            },
+          });
+
+        const hasPaymentInProgress =
+          pendingPayments.some(
+            (payment) =>
+              payment.providerPaymentId !== null,
+          );
+
+        if (
+          pendingPayments.length === 0 ||
+          hasPaymentInProgress
+        ) {
+          continue;
+        }
+
+        for (const payment of pendingPayments) {
+          await this.cancelPendingPayment(
+            payment.id,
+            "expired",
+          );
+        }
+
+        expiredOrders += 1;
+      } catch (error) {
+        console.error(
+          `Não foi possível expirar o pedido ${order.id}.`,
+          error,
+        );
+      }
+    }
+
+    return expiredOrders;
+  }
+
+  private async applyProviderPayment(
+    providerPaymentId: string,
+    providerPayment: GatewayPayment,
+  ): Promise<void> {
+    if (
+      !providerPayment.externalReference ||
+      typeof providerPayment.amount !== "number" ||
       !providerPayment.status
     ) {
       return;
@@ -506,7 +551,7 @@ export class PaymentService {
     }
 
     const amountInCents = Math.round(
-      providerPayment.transaction_amount * 100,
+      providerPayment.amount * 100,
     );
 
     await prisma.$transaction(
@@ -515,7 +560,7 @@ export class PaymentService {
           await transaction.payment.findUnique({
             where: {
               externalReference:
-                providerPayment.external_reference!,
+                providerPayment.externalReference!,
             },
 
             include: {

@@ -4,22 +4,12 @@ import {
 } from 'react';
 
 import {
-  Platform,
-} from 'react-native';
-
-import * as WebBrowser from 'expo-web-browser';
-
-import {
   useFocusEffect,
 } from '@react-navigation/native';
 
 import {
   cartService,
 } from '../services/cart.service';
-
-import {
-  MERCADOPAGO_RETURN_URL,
-} from '../config/payment';
 
 import {
   paymentService,
@@ -32,6 +22,10 @@ import type {
 import {
   getApiErrorMessage,
 } from '../utils/error';
+
+import {
+  openPaymentPage,
+} from '../utils/openPaymentPage';
 
 const emptyCart: Cart = {
   id: null,
@@ -132,16 +126,9 @@ export function useCheckout() {
           setCart(emptyCart);
 
           try {
-            if (Platform.OS === 'web') {
-              await WebBrowser.openBrowserAsync(
-                checkout.initPoint,
-              );
-            } else {
-              await WebBrowser.openAuthSessionAsync(
-                checkout.initPoint,
-                MERCADOPAGO_RETURN_URL,
-              );
-            }
+            await openPaymentPage(
+              checkout.initPoint,
+            );
           } catch {
             setErrorMessage(
               'O pedido foi criado. Acesse os pedidos para retomar o pagamento.',
